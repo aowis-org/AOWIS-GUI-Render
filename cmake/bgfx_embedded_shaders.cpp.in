@@ -1,0 +1,20 @@
+// Generated from the shader families embedded in AOWIS::RenderCore.
+// Must be a TU in the STATIC library, not the executable: each Qt resource
+// initializer is referenced explicitly so the linker extracts its object.
+#include <QResource>
+
+static void registerAowisBgfxShaders()
+{
+@aowis_shader_init_commands@}
+
+namespace MapBgfxBackend
+{
+void initializeEmbeddedShaders()
+{
+    static const bool registered = []() {
+        registerAowisBgfxShaders();
+        return true;
+    }();
+    (void)registered;
+}
+}
