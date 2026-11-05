@@ -21,6 +21,11 @@ shader_names = ["vs_globe_surface", "fs_globe_surface", "vs_hud", "fs_hud"]
 for family in ["glsl", "essl", "spirv", "metal", "dx11"]:
     for name in shader_names:
         assert (root / "src/map/bgfx/shaders/bin" / family / (name + ".bin")).is_file()
+for source in ["map_bgfx_2d_projection.h", "map_bgfx_three_view_camera.h",
+               "map_bgfx_globe_icon_index.h", "map_bgfx_globe_height_cache.h",
+               "map_bgfx_globe_imagery.h", "map_bgfx_pan_reuse.h"]:
+    assert (root / "src/map/bgfx" / source).is_file(), source
+assert "AOWIS::RenderGeometry" in cmake
 for path in (root / "src/map/bgfx").glob("*.cpp"):
     text = path.read_text()
     assert not re.search(r"\bauto\s+\w", text), path

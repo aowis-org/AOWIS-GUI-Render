@@ -20,6 +20,28 @@ All original map shader binaries are preserved, including GL, GLES/WebGL 2,
 Vulkan, D3D11 and Metal families. Qt resource paths remain
 `:/aowis/map/bgfx/<family>/<shader>.bin` and are registered by the library.
 
+## Production geometry shared between desktop and Mobile
+
+- `AOWIS::RenderGeometry` is a **Qt-, bgfx-, and model-free** header-only
+  target: continuous Web Mercator projection, secondary-view camera, globe
+  icon spatial indexing, terrain-height query cache, and globe imagery tile
+  fallback UV coordinates. The implementation is moved from GUI, not copied.
+- `MapBgfxPanReuse` is now in RenderCore because its screen-space HUD reuse
+  types use Qt Core. GUI remains its host and controls pan/content invalidation.
+- Configure and run the standalone geometry regressions without any Qt/bgfx
+  checkout:
+
+  ```sh
+  cmake -S . -B build-geometry -DAOWIS_RENDER_BUILD_DEVICE=OFF \
+      -DAOWIS_RENDER_BUILD_MAP_CORE=OFF -DAOWIS_RENDER_BUILD_GEOMETRY_TESTS=ON
+  cmake --build build-geometry -j 8
+  ctest --test-dir build-geometry --output-on-failure
+  ```
+
+Geometry extraction is a first production step, not a transfer of GPU draw
+submission. The 2D network mesh / GPU owner and the 3D globe draw code remain
+in the GUI until their model and Qt host dependencies have been isolated.
+
 ## Host integration
 
 The GUI sets `AOWIS_RENDER_BUILD_MAP_CORE=ON`, provides its pinned upstream
@@ -32,8 +54,9 @@ and shuts down its borrowed Qt Quick EGL context through the shared device
 manager. It intentionally retains `bgfx::frame(BGFX_FRAME_FLUSH)` and Qt Quick
 scene-graph ownership. No second bgfx runtime is added to either executable.
 
-A host may use `external/AOWIS-GUI-Render` as a Git submodule, or (for local
-development) keep `AOWIS-GUI-Render` alongside its GUI/Mobile checkout.
+Both hosts pin `external/AOWIS-GUI-Render` as a Git submodule. Commit Render
+changes before advancing either host gitlink, then build against the newly
+pinned revision. No implicit sibling checkout selection.
 
 ## Safety contracts
 
@@ -48,8 +71,8 @@ development) keep `AOWIS-GUI-Render` alongside its GUI/Mobile checkout.
 
 ## Extraction status
 
-The library boundary, device lifecycle, map GPU uploader and shader assets
-have been moved to this repository. The larger GUI-specific `MapBgfxSurface`,
+The library boundary, device lifecycle, camera/projection/terrain geometry,
+map GPU uploader and shader assets have been moved to this repository. The larger GUI-specific `MapBgfxSurface`,
 HUD text content/controller, 2D/3D scene preparation, input routing and
 Projects DAG presentation have *not* been extracted. Moving them verbatim
 would introduce GUI services, widgets and application model dependencies into

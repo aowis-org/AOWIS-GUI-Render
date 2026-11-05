@@ -5,10 +5,12 @@
 | bgfx target | Lean AOWIS unity build via Render CMake | Pinned `bgfx.cmake` target supplied to Render |
 | Render thread | GUI/map submission thread | Qt Quick scene-graph render thread |
 | External window | `BgfxQtNativeSurface` from live `QWindow` | Borrowed EGL context from `QOpenGLContext` |
-| Shared library | `AOWIS::RenderCore` (includes RenderDevice) | `AOWIS::RenderDevice` |
+| Shared library | `AOWIS::RenderCore`, `AOWIS::RenderGeometry` | `AOWIS::RenderDevice`, `AOWIS::RenderGeometry` |
+| Map geometry | Common Mercator camera, icon index, terrain height cache and imagery UV | Same renderer-owned algorithms, without GUI/model dependencies |
 | Frame semantics | `BgfxFrameCoordinator` / ordinary `bgfx::frame()` | Qt owns swap; `bgfx::frame(BGFX_FRAME_FLUSH)` |
 | Shaders | Embedded renderer-map resources | Mobile demo's pinned sample shaders |
 
+RenderGeometry exposes Qt/bgfx-free production map geometry for both hosts.
 RenderDevice owns the bgfx device generation and retirement guards in both
 apps. Qt-specific adapters stay on the host side. Mobile still uses one
 independent scene (stress-test GPU geometry), not the production 3D globe.
