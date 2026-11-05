@@ -3,6 +3,39 @@
 Shared bgfx renderer components for AOWIS-SERVER-GUI (Qt Widgets/WebAssembly)
 and AOWIS-GUI-Mobile (Qt Quick/Android/Linux).
 
+## Standalone Linux build (Ninja)
+
+Render owns its dependencies. For an existing GUI checkout, register exactly
+that GUI's **pinned** bgfx/bimg/bx revisions once in the Render repository:
+
+```sh
+./tools/bootstrap_vendor_submodules.sh ../AOWIS-SERVER-GUI
+# Review the staged .gitmodules and 160000 gitlinks, then commit and push them.
+```
+
+All subsequent Render clones work without any GUI checkout:
+
+```sh
+git submodule update --init --recursive   # or ./git_submodule_init.sh
+cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-linux -j 8
+ctest --test-dir build-linux --output-on-failure
+```
+
+Requires CMake 3.21+, Ninja, C++20, Qt6 Core and Gui development packages,
+and the native libraries required by the enabled bgfx backends. This builds
+`RenderGeometry`, `RenderNetwork`, `RenderDevice`, `RenderCore`, the selected
+shader resources and standalone tests. The core-link test checks shader
+registration and device linkage without a display or GPU.
+
+A parent such as GUI can still provide its own **single** `bgfx` CMake target
+and `AOWIS_RENDER_VENDOR_ROOT`, keeping its pinned sources and avoiding a
+second runtime. The standalone Render vendoring is not compiled in that case.
+
+For geometry-only builds without Qt or vendor checkouts, explicitly disable
+`AOWIS_RENDER_BUILD_DEVICE`, `AOWIS_RENDER_BUILD_MAP_CORE` and
+`AOWIS_RENDER_BUILD_NETWORK_SCENE`.
+
 ## Current libraries
 
 - `AOWIS::RenderDevice` / `aowis-render-device`: Qt-independent, process-wide
@@ -38,9 +71,7 @@ Vulkan, D3D11 and Metal families. Qt resource paths remain
   ctest --test-dir build-geometry --output-on-failure
   ```
 
-Geometry extraction is a first production step, not a transfer of GPU draw
-submission. The 2D network mesh / GPU owner and the 3D globe draw code remain
-in the GUI until their model and Qt host dependencies have been isolated.
+The production 2D network scene, mesh staging and GPU submission are in Render; GUI retains its hydraulic snapshot adapter and user-interaction logic. The 3D globe draw code remains in GUI.
 
 ## Host integration
 
@@ -72,9 +103,10 @@ pinned revision. No implicit sibling checkout selection.
 ## Extraction status
 
 The library boundary, device lifecycle, camera/projection/terrain geometry,
-map GPU uploader and shader assets have been moved to this repository. The larger GUI-specific `MapBgfxSurface`,
-HUD text content/controller, 2D/3D scene preparation, input routing and
-Projects DAG presentation have *not* been extracted. Moving them verbatim
+production 2D network scene/mesh/draw submission, GPU uploaders and shader assets
+have been moved to this repository. The larger GUI-specific `MapBgfxSurface`,
+HUD text content/controller, 3D scene preparation, input routing and Projects
+DAG presentation have *not* been extracted. Moving them verbatim
 would introduce GUI services, widgets and application model dependencies into
 Mobile. A later step should isolate backend-neutral scene inputs and rendering
 from their GUI host, then replace Mobile's test geometry with that interface.

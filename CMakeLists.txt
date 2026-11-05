@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.21)
 project(AOWIS-GUI-Render LANGUAGES CXX)
 
+# A standalone Render checkout is a fully buildable/testable CMake project.
+# When embedded by GUI/Mobile, their parent CTest settings remain authoritative.
+if(PROJECT_IS_TOP_LEVEL)
+    include(CTest)
+endif()
+
 # Immutable geometry interfaces used by both the Qt Widgets desktop host and
 # the Android Qt Quick host. Header-only, without Qt, bgfx, model or GPU.
 # Keep this target available when only testing geometry on a host lacking
@@ -29,7 +35,7 @@ if(AOWIS_RENDER_BUILD_MAP_CORE AND NOT AOWIS_RENDER_BUILD_NETWORK_SCENE)
     message(FATAL_ERROR "Map GPU core requires AOWIS_RENDER_BUILD_NETWORK_SCENE=ON")
 endif()
 option(AOWIS_RENDER_BUILD_GEOMETRY_TESTS
-    "Build the standalone Qt/bgfx-free production geometry regressions" OFF)
+    "Build the standalone production geometry regressions" ${PROJECT_IS_TOP_LEVEL})
 if(AOWIS_RENDER_BUILD_MAP_CORE AND NOT AOWIS_RENDER_BUILD_DEVICE)
     message(FATAL_ERROR "Map render core requires AOWIS_RENDER_BUILD_DEVICE=ON")
 endif()
@@ -139,12 +145,27 @@ if(AOWIS_RENDER_BUILD_MAP_CORE)
     endif()
     aowis_bgfx_add_shaders(aowis-render-core)
 
-    # Pass the embedded family to a parent-hosted link/resource regression.
-    set(AOWIS_BGFX_TEST_SHADER_FAMILY "${AOWIS_BGFX_TEST_SHADER_FAMILY}" PARENT_SCOPE)
+    # Parent-hosted link/resource regressions need the selected family too.
+    # There is no parent scope in a standalone build.
+    if(NOT PROJECT_IS_TOP_LEVEL)
+        set(AOWIS_BGFX_TEST_SHADER_FAMILY "${AOWIS_BGFX_TEST_SHADER_FAMILY}" PARENT_SCOPE)
+    endif()
     if(EMSCRIPTEN)
         option(AOWIS_WASM_SIMD "Compile app GPU code with wasm SIMD" ON)
         if(AOWIS_WASM_SIMD)
             target_compile_options(aowis-render-core PRIVATE -msimd128)
         endif()
     endif()
+endif()
+
+# A real executable link test catches missing symbols and missing static-library
+# Qt resources. It does not initialize bgfx or require a display/GPU.
+if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND AOWIS_RENDER_BUILD_MAP_CORE)
+    add_executable(aowis-render-core-link-tests
+        tests/render_core_link_test.cpp)
+    target_link_libraries(aowis-render-core-link-tests PRIVATE AOWIS::RenderCore)
+    target_compile_definitions(aowis-render-core-link-tests PRIVATE
+        AOWIS_RENDER_TEST_SHADER_PATH=":/aowis/map/bgfx/${AOWIS_BGFX_TEST_SHADER_FAMILY}/vs_network_2d.bin")
+    add_test(NAME aowis-render-core-link COMMAND aowis-render-core-link-tests)
+    set_tests_properties(aowis-render-core-link PROPERTIES LABELS "aowis;integration")
 endif()
