@@ -34,8 +34,14 @@ option(AOWIS_RENDER_BUILD_NETWORK_SCENE
 if(AOWIS_RENDER_BUILD_MAP_CORE AND NOT AOWIS_RENDER_BUILD_NETWORK_SCENE)
     message(FATAL_ERROR "Map GPU core requires AOWIS_RENDER_BUILD_NETWORK_SCENE=ON")
 endif()
+option(AOWIS_RENDER_BUILD_GLOBE_MODELS
+    "Build host-neutral production globe tank/reservoir meshes (Qt6 Gui)"
+    ${AOWIS_RENDER_BUILD_MAP_CORE})
 option(AOWIS_RENDER_BUILD_GEOMETRY_TESTS
     "Build the standalone production geometry regressions" ${PROJECT_IS_TOP_LEVEL})
+if(AOWIS_RENDER_BUILD_MAP_CORE AND NOT AOWIS_RENDER_BUILD_GLOBE_MODELS)
+    message(FATAL_ERROR "Map render core requires AOWIS_RENDER_BUILD_GLOBE_MODELS=ON")
+endif()
 if(AOWIS_RENDER_BUILD_MAP_CORE AND NOT AOWIS_RENDER_BUILD_DEVICE)
     message(FATAL_ERROR "Map render core requires AOWIS_RENDER_BUILD_DEVICE=ON")
 endif()
@@ -80,6 +86,34 @@ if(AOWIS_RENDER_BUILD_NETWORK_SCENE)
             tests/render_2d_network_scene_test.cpp)
         target_link_libraries(aowis-render-2d-network-scene-tests PRIVATE AOWIS::RenderNetwork)
         add_test(NAME aowis-render-2d-network-scene COMMAND aowis-render-2d-network-scene-tests)
+    endif()
+endif()
+
+# Globe model mesh generation is shared, and independent of GUI, MODEL,
+# GeographicLib, bgfx and any native surface. Host-specific material images
+# remain in the host until the texture asset resources are extracted.
+if(AOWIS_RENDER_BUILD_GLOBE_MODELS)
+    find_package(Qt6 REQUIRED COMPONENTS Gui)
+    add_library(aowis-render-globe STATIC
+        src/map/render/map_globe_render_instances.h
+        src/map/render/map_globe_vertical_transform.h
+        src/map/render/map_globe_surface_vertex.h
+        src/map/render/map_globe_tank_model.h
+        src/map/render/map_globe_tank_model.cpp
+        src/map/render/map_globe_reservoir_model.h
+        src/map/render/map_globe_reservoir_model.cpp)
+    add_library(AOWIS::RenderGlobe ALIAS aowis-render-globe)
+    target_compile_features(aowis-render-globe PUBLIC cxx_std_20)
+    target_include_directories(aowis-render-globe PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(aowis-render-globe PUBLIC Qt6::Gui)
+
+    if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
+        add_executable(aowis-render-globe-models-tests
+            tests/render_globe_models_test.cpp)
+        target_link_libraries(aowis-render-globe-models-tests PRIVATE AOWIS::RenderGlobe)
+        add_test(NAME aowis-render-globe-models COMMAND aowis-render-globe-models-tests)
+        set_tests_properties(aowis-render-globe-models PROPERTIES LABELS "aowis;geometry")
     endif()
 endif()
 

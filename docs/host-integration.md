@@ -40,3 +40,12 @@ Mobile enables `AOWIS_RENDER_BUILD_NETWORK_SCENE=ON` and tests the shared
 scene/mesh contract today, while keeping `AOWIS_RENDER_BUILD_MAP_CORE=OFF`
 until its production GPU scene integration. The GPU core requires Qt6 Gui and
 the AOWIS shader pack; RenderGeometry remains entirely Qt-free.
+
+## Globe model mesh ownership
+
+`AOWIS::RenderGlobe` generates production 3D tank and reservoir mesh
+vertices from renderer-owned globe instance layouts. It needs Qt6 Gui only;
+no bgfx, MODEL or GUI sources are linked into this target. GUI remains the
+reference host for rendering and provides material images from its existing
+Qt resources (`:/map-3d/`) through `map_bgfx_globe_model_images.cpp`.
+Next extraction work will decouple globe GPU submission and terrain scenes.

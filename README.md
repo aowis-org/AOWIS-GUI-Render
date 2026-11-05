@@ -24,7 +24,7 @@ ctest --test-dir build-linux --output-on-failure
 
 Requires CMake 3.21+, Ninja, C++20, Qt6 Core and Gui development packages,
 and the native libraries required by the enabled bgfx backends. This builds
-`RenderGeometry`, `RenderNetwork`, `RenderDevice`, `RenderCore`, the selected
+`RenderGeometry`, `RenderNetwork`, `RenderGlobe`, `RenderDevice`, `RenderCore`, the selected
 shader resources and standalone tests. The core-link test checks shader
 registration and device linkage without a display or GPU.
 
@@ -71,7 +71,15 @@ Vulkan, D3D11 and Metal families. Qt resource paths remain
   ctest --test-dir build-geometry --output-on-failure
   ```
 
-The production 2D network scene, mesh staging and GPU submission are in Render; GUI retains its hydraulic snapshot adapter and user-interaction logic. The 3D globe draw code remains in GUI.
+The production 2D network scene, mesh staging and GPU submission are in Render; GUI retains its hydraulic snapshot adapter and user-interaction logic.
+
+The first 3D extraction moves production tank and reservoir mesh generation,
+vertex/instance layouts, vertical transform, and globe surface vertex math
+into **`AOWIS::RenderGlobe`** (Qt6 Gui; no bgfx, GUI model, or platform host
+requirements). GUI continues supplying the existing `:/map-3d/*_albedo.png`
+texture resources through a small host adapter. Globe GPU draw submission,
+camera/model synchronization, terrain scene preparation, and GPU textures
+remain in GUI for subsequent extraction steps.
 
 ## Host integration
 
