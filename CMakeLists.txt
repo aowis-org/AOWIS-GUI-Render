@@ -21,6 +21,13 @@ target_sources(aowis-render-geometry INTERFACE
 option(AOWIS_RENDER_BUILD_DEVICE "Build the bgfx-dependent renderer device" ON)
 option(AOWIS_RENDER_BUILD_MAP_CORE
     "Build AOWIS map GPU uploaders and embed its shader families" ON)
+# Production 2D geometry is usable on Mobile with Qt6 Core only.
+option(AOWIS_RENDER_BUILD_NETWORK_SCENE
+    "Build 2D network scene and mesh staging (Qt6 Core, no bgfx)"
+    ${AOWIS_RENDER_BUILD_MAP_CORE})
+if(AOWIS_RENDER_BUILD_MAP_CORE AND NOT AOWIS_RENDER_BUILD_NETWORK_SCENE)
+    message(FATAL_ERROR "Map GPU core requires AOWIS_RENDER_BUILD_NETWORK_SCENE=ON")
+endif()
 option(AOWIS_RENDER_BUILD_GEOMETRY_TESTS
     "Build the standalone Qt/bgfx-free production geometry regressions" OFF)
 if(AOWIS_RENDER_BUILD_MAP_CORE AND NOT AOWIS_RENDER_BUILD_DEVICE)
@@ -37,6 +44,30 @@ if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
         add_test(NAME aowis-render-${AOWIS_GEOMETRY_TEST}
             COMMAND aowis-render-${AOWIS_GEOMETRY_TEST}-tests)
     endforeach()
+endif()
+
+# Camera-independent network scene and CPU mesh staging; no GPU or MODEL.
+if(AOWIS_RENDER_BUILD_NETWORK_SCENE)
+    find_package(Qt6 REQUIRED COMPONENTS Core)
+    add_library(aowis-render-network STATIC
+        src/map/render/map_node_declutter.h
+        src/map/render/map_node_declutter.cpp
+        src/map/bgfx/map_bgfx_2d_network_input.h
+        src/map/bgfx/map_bgfx_2d_scene.h
+        src/map/bgfx/map_bgfx_2d_scene_variants.h
+        src/map/bgfx/map_bgfx_2d_mesh.h)
+    add_library(AOWIS::RenderNetwork ALIAS aowis-render-network)
+    target_compile_features(aowis-render-network PUBLIC cxx_std_20)
+    target_include_directories(aowis-render-network PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(aowis-render-network PUBLIC Qt6::Core AOWIS::RenderGeometry)
+
+    if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
+        add_executable(aowis-render-2d-network-scene-tests
+            tests/render_2d_network_scene_test.cpp)
+        target_link_libraries(aowis-render-2d-network-scene-tests PRIVATE AOWIS::RenderNetwork)
+        add_test(NAME aowis-render-2d-network-scene COMMAND aowis-render-2d-network-scene-tests)
+    endif()
 endif()
 
 # Exactly one bgfx target per process. GUI creates it here using its existing
@@ -69,6 +100,9 @@ if(AOWIS_RENDER_BUILD_MAP_CORE)
     find_package(Qt6 REQUIRED COMPONENTS Gui)
     add_library(aowis-render-core STATIC
         src/map/bgfx/map_bgfx_backend.h
+        src/map/bgfx/map_bgfx_2d_style_binding.h
+        src/map/bgfx/map_bgfx_2d_gpu.cpp
+        src/map/bgfx/map_bgfx_2d_gpu.h
         src/map/bgfx/map_bgfx_2d_imagery_atlas.cpp
         src/map/bgfx/map_bgfx_2d_imagery_atlas.h
         src/map/bgfx/map_bgfx_2d_imagery_gpu.cpp
@@ -85,7 +119,7 @@ if(AOWIS_RENDER_BUILD_MAP_CORE)
     target_include_directories(aowis-render-core PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
     target_link_libraries(aowis-render-core PUBLIC
-        AOWIS::RenderDevice AOWIS::RenderGeometry Qt6::Gui)
+        AOWIS::RenderDevice AOWIS::RenderGeometry AOWIS::RenderNetwork Qt6::Gui)
 
     if(NOT AOWIS_BGFX_RENDERERS)
         message(FATAL_ERROR
