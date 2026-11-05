@@ -10,6 +10,9 @@ public:
     enum class Mode { VertexColor = 0, Symbology = 1, Selection = 2, Diagnostic = 3, Heatmap = 4 };
     enum class Table { Nodes = 0, Links = 1 };
     virtual ~MapBgfx2dStyleBinding() = default;
+    // The host must have initialized its styling textures and uniforms before
+    // a network draw can submit GPU work. Each host owns that readiness test.
+    virtual bool ready() const = 0;
     virtual void bind(Mode mode, Table table = Table::Nodes,
                       bool tint_selected_icons = false) const = 0;
 };

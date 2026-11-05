@@ -44,6 +44,13 @@ if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
         add_test(NAME aowis-render-${AOWIS_GEOMETRY_TEST}
             COMMAND aowis-render-${AOWIS_GEOMETRY_TEST}-tests)
     endforeach()
+    # Keep the GPU style-binding ABI testable without Qt, bgfx, or a GPU.
+    add_executable(aowis-render-2d-style-binding-tests
+        tests/render_2d_style_binding_test.cpp)
+    target_link_libraries(aowis-render-2d-style-binding-tests PRIVATE
+        AOWIS::RenderGeometry)
+    add_test(NAME aowis-render-2d-style-binding
+        COMMAND aowis-render-2d-style-binding-tests)
 endif()
 
 # Camera-independent network scene and CPU mesh staging; no GPU or MODEL.
