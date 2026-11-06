@@ -31,7 +31,28 @@ struct DynamicIndexBufferHandle { std::uint16_t idx; };
 struct ProgramHandle { std::uint16_t idx; };
 struct UniformHandle { std::uint16_t idx; };
 struct TextureHandle { std::uint16_t idx; };
-struct VertexLayout {};
+struct Attrib
+{
+    enum Enum { Position, Normal, Color0, TexCoord0, TexCoord1, TexCoord2,
+                TexCoord3, TexCoord4, TexCoord5 };
+};
+struct AttribType { enum Enum { Float }; };
+struct VertexLayout
+{
+    struct Attribute { Attrib::Enum id; std::uint8_t components; };
+    std::vector<Attribute> attributes;
+    std::uint16_t stride = 0;
+    VertexLayout &begin() { attributes.clear(); stride = 0; return *this; }
+    VertexLayout &add(Attrib::Enum id, std::uint8_t components, AttribType::Enum)
+    {
+        attributes.push_back({id, components});
+        stride += static_cast<std::uint16_t>(components * sizeof(float));
+        return *this;
+    }
+    VertexLayout &skip(std::uint8_t bytes) { stride += bytes; return *this; }
+    VertexLayout &end() { return *this; }
+    std::uint16_t getStride() const { return stride; }
+};
 struct TextureFormat { enum Enum { RGBA8 }; };
 struct UniformType { enum Enum { Mat4, Vec4, Sampler }; };
 struct Memory { std::vector<std::uint8_t> bytes; };

@@ -81,6 +81,15 @@ if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
     add_test(NAME aowis-render-globe-buffer-pool-mock
         COMMAND aowis-render-globe-buffer-pool-mock-tests)
     set_tests_properties(aowis-render-globe-buffer-pool-mock PROPERTIES LABELS "aowis;rendering")
+    add_executable(aowis-render-globe-vertex-layouts-mock-tests
+        src/map/bgfx/map_bgfx_globe_vertex_layouts.cpp
+        tests/render_globe_vertex_layouts_mock_test.cpp)
+    target_link_libraries(aowis-render-globe-vertex-layouts-mock-tests PRIVATE AOWIS::RenderGeometry)
+    target_include_directories(aowis-render-globe-vertex-layouts-mock-tests BEFORE PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mock_bgfx")
+    add_test(NAME aowis-render-globe-vertex-layouts-mock
+        COMMAND aowis-render-globe-vertex-layouts-mock-tests)
+    set_tests_properties(aowis-render-globe-vertex-layouts-mock PROPERTIES LABELS "aowis;rendering")
     add_executable(aowis-render-globe-resource-pool-mock-tests
         src/map/bgfx/map_bgfx_globe_resource_pool.cpp
         tests/render_globe_resource_pool_mock_test.cpp)
@@ -195,6 +204,8 @@ if(AOWIS_RENDER_BUILD_MAP_CORE)
         src/map/bgfx/map_bgfx_globe_gpu.cpp
         src/map/bgfx/map_bgfx_globe_buffer_pool.h
         src/map/bgfx/map_bgfx_globe_buffer_pool.cpp
+        src/map/bgfx/map_bgfx_globe_vertex_layouts.h
+        src/map/bgfx/map_bgfx_globe_vertex_layouts.cpp
         src/map/bgfx/map_bgfx_globe_resource_pool.h
         src/map/bgfx/map_bgfx_globe_resource_pool.cpp
         src/map/bgfx/map_bgfx_globe_texture_pixels.cpp

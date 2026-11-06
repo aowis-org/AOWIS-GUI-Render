@@ -162,3 +162,12 @@ streams preserve their allocation but report a zero draw count. `release()`
 must run before device teardown, and the same instance can upload again
 after device reinitialization. The shared `MapBgfxGlobeResourcePool` owns
 shader programs, uniforms and model-material textures.
+
+### Globe vertex-layout ownership
+
+`MapBgfxGlobeVertexLayouts` lives in `AOWIS::RenderCore` and defines all five
+production globe-network shader attribute layouts (link, node, icon, junction,
+model). The GUI supplies only the byte strides of its existing scene vertex
+structs. Render validates their strides before GPU allocation; GUI maintains
+compile-time offset checks for the shader-facing float prefixes. No GUI model
+headers are used by Render, and no second bgfx device is created.
