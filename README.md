@@ -121,3 +121,14 @@ from their GUI host, then replace Mobile's test geometry with that interface.
 
 Use `./tools/apply_patch.sh` for incremental ZIP patches and
 `./tests/test_patch_tooling.sh` to validate ZIP patch tooling.
+
+### 3D globe-network GPU submission
+
+`MapBgfxGlobeGpu` (in `AOWIS::RenderCore`) owns the production globe
+network's pass order, bgfx vertex/index binding, per-draw uniforms,
+shader-compatible style binding, and GPU submissions. It does not access GUI
+hydraulic types, map widgets, camera controllers, or network snapshots.
+`MapBgfxGlobeDrawPass` is a Qt/bgfx-free, regression-tested description of
+Solid, X-Ray and Hide pass ordering. The GUI currently supplies buffer,
+program, texture and uniform handles and owns their lifetime; migrating
+resource allocation/scene synchronization is a separate later step.

@@ -22,6 +22,7 @@ target_sources(aowis-render-geometry INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/map/bgfx/map_bgfx_globe_icon_index.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/map/bgfx/map_bgfx_globe_height_cache.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/map/bgfx/map_bgfx_globe_imagery.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/map/bgfx/map_bgfx_globe_draw_plan.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/map/bgfx/map_bgfx_2d_imagery_layout.h")
 
 option(AOWIS_RENDER_BUILD_DEVICE "Build the bgfx-dependent renderer device" ON)
@@ -63,6 +64,22 @@ if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
         AOWIS::RenderGeometry)
     add_test(NAME aowis-render-2d-style-binding
         COMMAND aowis-render-2d-style-binding-tests)
+    add_executable(aowis-render-globe-draw-plan-tests
+        tests/render_globe_draw_plan_test.cpp)
+    target_link_libraries(aowis-render-globe-draw-plan-tests PRIVATE AOWIS::RenderGeometry)
+    add_test(NAME aowis-render-globe-draw-plan COMMAND aowis-render-globe-draw-plan-tests)
+    set_tests_properties(aowis-render-globe-draw-plan PROPERTIES LABELS "aowis;rendering")
+    # Compile and execute the production GPU submission implementation against
+    # a tiny recording bgfx stub: this exercises real draw calls even on
+    # machines without a graphics device, Qt or vendor submodules.
+    add_executable(aowis-render-globe-gpu-mock-tests
+        src/map/bgfx/map_bgfx_globe_gpu.cpp
+        tests/render_globe_gpu_mock_test.cpp)
+    target_link_libraries(aowis-render-globe-gpu-mock-tests PRIVATE AOWIS::RenderGeometry)
+    target_include_directories(aowis-render-globe-gpu-mock-tests BEFORE PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mock_bgfx")
+    add_test(NAME aowis-render-globe-gpu-mock COMMAND aowis-render-globe-gpu-mock-tests)
+    set_tests_properties(aowis-render-globe-gpu-mock PROPERTIES LABELS "aowis;rendering")
 endif()
 
 # Camera-independent network scene and CPU mesh staging; no GPU or MODEL.
@@ -155,6 +172,9 @@ if(AOWIS_RENDER_BUILD_MAP_CORE)
         src/map/bgfx/map_bgfx_2d_imagery_gpu.cpp
         src/map/bgfx/map_bgfx_2d_imagery_gpu.h
         src/map/bgfx/map_bgfx_2d_imagery_layout.h
+        src/map/bgfx/map_bgfx_globe_draw_plan.h
+        src/map/bgfx/map_bgfx_globe_gpu.h
+        src/map/bgfx/map_bgfx_globe_gpu.cpp
         src/map/bgfx/map_bgfx_pan_reuse.h
         src/map/bgfx/map_bgfx_hud_canvas.h
         src/map/bgfx/map_bgfx_hud_gpu.cpp
