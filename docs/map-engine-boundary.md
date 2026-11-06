@@ -29,7 +29,8 @@ Host MapModel, camera, provider/dataset configuration
                       terrain drawing, sky/heatmap GPU, shared imagery atlas
 ```
 
-`MapBgfxSurface` owns the desktop map's frame/event orchestration. The
+Render's `MapBgfxMapView` owns the map's frame/event orchestration; the GUI's
+`MapBgfxSurface` is its Qt Widgets host (`MapBgfxMapViewHost`). The
 existing source contains substantial backend-neutral CPU work, but it still
 references GUI `MapModel`, Qt `QObject` repositories, server configuration,
 and—in parts of the 3D network scene—the hydraulic model.

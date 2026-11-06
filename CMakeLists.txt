@@ -693,9 +693,11 @@ endif()
 # The bgfx map renderers above the GPU core: GPU network colouring
 # (MapBgfxEntityStyle), the globe network and globe terrain surfaces, 2D
 # symbology / picking / snapshot adapter, decluttered labels and the native
-# HUD (layout, input, legend). Host assets (model textures) and settings are
-# injected; window, input routing and the Qt Widgets surface stay with the
-# host.
+# HUD (layout, input, legend), and MapBgfxMapView: the toolkit-neutral map
+# view (frame loop, device lifecycle, native-window event routing, picking,
+# terrain queries). Host assets (model textures, HUD images), settings, the
+# native handle capture and the window embedding are injected by the host
+# (MapBgfxMapViewHost: the GUI's Qt Widgets surface, the mobile Qt Quick item).
 option(AOWIS_RENDER_BUILD_MAP
     "Build the bgfx map renderers (RenderCore, RenderGlobeNetwork, RenderMapData)"
     ${AOWIS_RENDER_BUILD_MAP_CORE})
@@ -720,8 +722,13 @@ if(AOWIS_RENDER_BUILD_MAP)
         src/map/bgfx/map_bgfx_hud.h
         src/map/bgfx/map_bgfx_hud.cpp
         src/map/bgfx/map_bgfx_labels.h
-        src/map/bgfx/map_bgfx_labels.cpp)
+        src/map/bgfx/map_bgfx_labels.cpp
+        src/map/bgfx/map_bgfx_map_view.h
+        src/map/bgfx/map_bgfx_map_view.cpp
+        src/map/core/map_frame_pacer.h
+        src/map/core/map_input_focus_policy.h)
     add_library(AOWIS::RenderMap ALIAS aowis-render-map)
+    set_target_properties(aowis-render-map PROPERTIES AUTOMOC ON)
     target_compile_features(aowis-render-map PUBLIC cxx_std_20)
     target_include_directories(aowis-render-map PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
@@ -734,9 +741,12 @@ if(AOWIS_RENDER_BUILD_MAP)
 
     if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
         # CPU sides only, no bgfx device: entity-style texels, 2D picking,
-        # layer visibility, HUD layout/input/legend, label placement.
+        # layer visibility, HUD layout/input/legend, label placement, the
+        # map view's host contract (never shown, so never initialized) and
+        # the native-window focus policy.
         foreach(aowis_render_map_test IN ITEMS
-                bgfx_entity_style bgfx_2d_picking map_bgfx_layer_visibility bgfx_hud bgfx_labels)
+                bgfx_entity_style bgfx_2d_picking map_bgfx_layer_visibility bgfx_hud bgfx_labels
+                map_bgfx_map_view map_input_focus_policy)
             string(REPLACE "_" "-" aowis_render_map_test_name "${aowis_render_map_test}")
             add_executable(aowis-render-${aowis_render_map_test_name}-tests
                 tests/${aowis_render_map_test}_test.cpp)

@@ -141,4 +141,28 @@ for token in ["this->tile_index_pool.get(tile.grid_cell_count)", "this->terrain_
     assert token in surface_cpp, token
 render_body = surface_cpp.split("MapBgfxGlobeSurface::FrameResult MapBgfxGlobeSurface::render(", 1)[1].split("// --- Heatmap", 1)[0]
 assert not re.search(r"bgfx::(setIndexBuffer|setVertexBuffer|submit)\(", render_body)
+# The toolkit-neutral map view: QObject, no Qt Widgets, no GUI services; the
+# host (MapBgfxMapViewHost) embeds its native window and injects the rest.
+view_header = (root / "src/map/bgfx/map_bgfx_map_view.h").read_text()
+view_source = (root / "src/map/bgfx/map_bgfx_map_view.cpp").read_text()
+view = view_header + view_source
+assert "class MapBgfxMapViewHost" in view_header
+assert "class MapBgfxMapView final : public QObject" in view_header
+assert "AUTOMOC ON" in cmake and "src/map/bgfx/map_bgfx_map_view.cpp" in cmake
+for relative in ["src/map/bgfx/map_bgfx_map_view.h", "src/map/bgfx/map_bgfx_map_view.cpp",
+                 "src/map/core/map_frame_pacer.h", "src/map/core/map_input_focus_policy.h"]:
+    text = (root / relative).read_text()
+    for included in re.findall(r'#include\s+"([^"]+)"', text):
+        assert included.startswith("aowis/model/") or (root / "src" / included).is_file(), \
+            relative + " includes " + included
+    assert not re.search(r"\bauto\s+\w", text), relative
+assert not re.search(r"#include\s+<Q(Widget|VBoxLayout|Application)>|\bQWidget\s*[*&]|createWindowContainer\(\w", view)
+for token in ["guiConfiguration", "guiShortcutRegistry", "UnitProfileManager", "UnitAwareView",
+              "BgfxQtNativeSurface", "MapBgfxGlobeHudController", "MapScaleDistance",
+              "mapGlobeTankAlbedoImage", '":/']:
+    assert token not in view, token
+for token in ["this->host->mapViewVisible()", "this->host->mapViewPalette()",
+              "this->host->mapViewFont()", "this->host->mapViewFocusNavigationInput(",
+              "captureNativeSurface(this->native_window)", "this->globe_hud_state_provider("]:
+    assert token in view_source, token
 print("Renderer extraction and shader-family contract: OK")

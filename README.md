@@ -104,8 +104,16 @@ registered resources without source-level dependency on GUI resource files.
 - `MapBgfxEntityStyle`, `MapBgfxGlobeNetwork` (model textures from the host:
   `setModelImages()`), `MapBgfxGlobeSurface` (detail setting from the host:
   `setTerrainDetailReductionSource()`), 2D symbology / picking / snapshot
-  adapter, `MapBgfxLabels`, `MapBgfxHud`. The Qt Widgets surface that owns
-  them (window, input routing) is still the GUI's `MapBgfxSurface`.
+  adapter, `MapBgfxLabels`, `MapBgfxHud`.
+- `MapBgfxMapView` (`map/bgfx/map_bgfx_map_view.h`): the map view that owns
+  them — frame loop, device lifecycle, native QWindow and its event routing,
+  picking, terrain queries, HUD. A `QObject`, no Qt Widgets. The host
+  implements `MapBgfxMapViewHost` (visibility, font, palette, focus; WASM:
+  size, ratio, cursor), embeds `nativeInputWindow()`, forwards its events
+  (`handleHostShown()`, `handleKeyPress()`, ...) and injects native handle
+  capture, terrain detail, model textures, HUD images, navigation keys, the
+  scale bar and the globe HUD state. The GUI's `MapBgfxSurface` is that host
+  for Qt Widgets.
 
 **Network render contract**
 
@@ -169,8 +177,8 @@ usage from a host, see [Build and host integration](docs/host-integration.md).
 
 ## What stays with the GUI today
 
-`MapBgfxSurface` and `MapBgfxGlobeSurface` are the desktop frame/scene
-orchestrators. The GUI also owns `MapGlobeSurfaceScene` (quadtree/LOD),
+The GUI's `MapBgfxSurface` hosts `MapBgfxMapView` in Qt Widgets and supplies
+its settings and assets. The GUI also owns `MapGlobeSurfaceScene` (quadtree/LOD),
 `MapGlobeSurfacePreparation`, `MapTerrainMeshScheduler`, decoded terrain and
 imagery repositories, provider configuration and upstream request adapters.
 The GUI supplies GeographicLib/geodesic sampling, height data, network

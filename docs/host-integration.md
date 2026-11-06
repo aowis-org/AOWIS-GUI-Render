@@ -16,6 +16,29 @@ surfaces are available through a single engine object yet.
 | bgfx source | Host-supplied pinned bx/bimg/bgfx target via Render | Pinned bgfx.cmake target, supplied by Mobile |
 | Native surface | GUI `BgfxQtNativeSurface` adaptor | Qt Quick borrowed EGL context |
 | Present | `BgfxFrameCoordinator` coordinates all registered native clients | Qt Quick owns swap; borrowed-context path uses `bgfx::frame(BGFX_FRAME_FLUSH)` |
+| Map view | `AOWIS::RenderMap` `MapBgfxMapView`, hosted by GUI `MapBgfxSurface` (`MapBgfxMapViewHost`) | Same view; Qt Quick host item to be written |
+
+## Hosting the map view
+
+`MapBgfxMapView` (`AOWIS::RenderMap`) is the complete map: 2D and globe,
+imagery, terrain, network, labels, HUD, picking and terrain queries. It is a
+`QObject`; the host supplies everything toolkit-specific:
+
+- implement `MapBgfxMapViewHost`: `mapViewVisible()`, `mapViewFont()`,
+  `mapViewPalette()`, `mapViewFocusNavigationInput()`; on WASM also the
+  area's logical size, device pixel ratio, screen, global position and
+  cursor;
+- embed `nativeInputWindow()` (desktop; the view deletes it if no host ever
+  reparented it);
+- forward events: `handleHostShown()`, `handleHostHidden()`,
+  `handleHostResized()`, `handleHostChange(type)`, `handleKeyPress()`,
+  `handleKeyRelease()`, `handleFocusOut()`; keep focus on another receiver
+  with `setNativeWindowAcceptsFocus(false)`;
+- inject `setNativeSurfaceCapture()` (Qt private native handles),
+  `setTerrainDetailReductionSource()`, `setGlobeModelImages()`,
+  `setHudImages()`, `setHudNavigationKeys()`, `setHudScaleProvider()` and
+  `setGlobeHudStateProvider()`;
+- the WASM page provides `window.aowisBgfxMap` (the browser canvas bridge).
 
 The GUI pins Render at `external/AOWIS-GUI-Render`. To advance a GUI checkout
 **after publishing Render**:
