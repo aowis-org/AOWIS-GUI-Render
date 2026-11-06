@@ -194,3 +194,12 @@ model). The GUI supplies only the byte strides of its existing scene vertex
 structs. Render validates their strides before GPU allocation; GUI maintains
 compile-time offset checks for the shader-facing float prefixes. No GUI model
 headers are used by Render, and no second bgfx device is created.
+
+### Globe terrain-aware X-Ray classification
+
+`MapGlobeUndergroundGeometry` owns the X-Ray link subdivision policy (20 m
+fallback, half the smallest resolved terrain-cell size, 0.25 m minimum,
+128-subdivision cap) and merges classification samples into contiguous buried
+runs before GPU tessellation. This preserves dashed-stroke continuity. The
+host supplies its terrain queries, WGS84 geodesic coordinates and vertical
+transforms; no hydraulic MODEL or GeographicLib dependency enters Render.

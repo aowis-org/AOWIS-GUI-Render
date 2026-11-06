@@ -113,6 +113,16 @@ if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
     add_test(NAME aowis-render-globe-flow-geometry-mock
         COMMAND aowis-render-globe-flow-geometry-mock-tests)
     set_tests_properties(aowis-render-globe-flow-geometry-mock PROPERTIES LABELS "aowis;geometry")
+    # Pure C++ classification policy: real production source, no Qt or GPU.
+    add_executable(aowis-render-globe-underground-geometry-tests
+        src/map/render/map_globe_underground_geometry.cpp
+        tests/render_globe_underground_geometry_test.cpp)
+    target_link_libraries(aowis-render-globe-underground-geometry-tests PRIVATE
+        AOWIS::RenderGeometry)
+    add_test(NAME aowis-render-globe-underground-geometry
+        COMMAND aowis-render-globe-underground-geometry-tests)
+    set_tests_properties(aowis-render-globe-underground-geometry PROPERTIES
+        LABELS "aowis;geometry")
     add_executable(aowis-render-globe-resource-pool-mock-tests
         src/map/bgfx/map_bgfx_globe_resource_pool.cpp
         tests/render_globe_resource_pool_mock_test.cpp)
@@ -169,6 +179,8 @@ if(AOWIS_RENDER_BUILD_GLOBE_MODELS)
         src/map/render/map_globe_flow_geometry.cpp
         src/map/render/map_globe_link_geometry.h
         src/map/render/map_globe_link_geometry.cpp
+        src/map/render/map_globe_underground_geometry.h
+        src/map/render/map_globe_underground_geometry.cpp
         src/map/render/map_globe_tank_model.h
         src/map/render/map_globe_tank_model.cpp
         src/map/render/map_globe_reservoir_model.h
@@ -188,6 +200,16 @@ if(AOWIS_RENDER_BUILD_GLOBE_MODELS)
         add_test(NAME aowis-render-globe-link-geometry
             COMMAND aowis-render-globe-link-geometry-tests)
         set_tests_properties(aowis-render-globe-link-geometry PROPERTIES LABELS "aowis;geometry")
+        # Independently link the actual production RenderGlobe archive, so
+        # missing CMake object registration cannot hide behind mock tests.
+        add_executable(aowis-render-globe-underground-library-link-tests
+            tests/render_globe_underground_geometry_test.cpp)
+        target_link_libraries(aowis-render-globe-underground-library-link-tests PRIVATE
+            AOWIS::RenderGlobe)
+        add_test(NAME aowis-render-globe-underground-library-link
+            COMMAND aowis-render-globe-underground-library-link-tests)
+        set_tests_properties(aowis-render-globe-underground-library-link PROPERTIES
+            LABELS "aowis;geometry;integration")
         add_executable(aowis-render-globe-flow-geometry-tests
             tests/render_globe_flow_geometry_test.cpp)
         target_link_libraries(aowis-render-globe-flow-geometry-tests PRIVATE AOWIS::RenderGlobe)
