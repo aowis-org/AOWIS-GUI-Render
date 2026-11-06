@@ -62,6 +62,7 @@ builds.
 | `AOWIS::RenderView` | Qt6 Gui, RenderGeo | `MapModel` (2D continuous zoom, globe orbit rig, screen <-> WGS84, imagery tile addressing through the host's `MapImageryProviderDirectory`), camera view state, globe picking, render cache math, render diagnostics |
 | `AOWIS::RenderGlobeTerrain` | Qt6 Gui, RenderView, RenderTerrainData, RenderGlobe | Globe terrain CPU pipeline: quadtree selection/LOD, surface preparation, mesh scheduler, terrain navigation, globe camera, heatmap scene; tiles from the host's `MapTerrainTileSource` |
 | `AOWIS::RenderMapData` | Qt6 Gui, RenderView, RenderTerrainData | Imagery and DEM tile repositories (scheduling, caches, decode workers, WASM browser decoder, dataset catalog, cache deletion) over the `InterfaceServerMap` contract; the host supplies a `MapServerTransport` |
+| `AOWIS::RenderGlobeNetwork` | Qt6 Gui, RenderGlobeTerrain, RenderNetwork, GeographicLib (private) | Network render contract (snapshot, symbology settings and ramps, entity kinds) and the globe network CPU side: retained globe network scene, render frame, icon atlas, resolved symbology data |
 | `AOWIS::RenderTerrainData` | Qt6 Core | Normalized 65×65 DEM tile decoder (v1 format), tile keys/endpoints, terrain dataset catalog |
 | `AOWIS::RenderNetwork` | Qt6 Core, RenderGeometry | Production 2D network scene variants and CPU mesh staging |
 | `AOWIS::RenderGlobe` | Qt6 Gui, RenderGeometry | 3D network/model/flow/link/underground geometry, terrain topology, scene invalidation policy |
@@ -96,6 +97,15 @@ registered resources without source-level dependency on GUI resource files.
   `MapImageryProviderDirectory` (change notifications via
   `providerCatalogChanged()` / `providerFallbackChanged()`), the orbit
   sensitivity as a getter (`setOrbitSensitivitySource()`).
+
+**Network render contract**
+
+- `network/network_render_snapshot.h`, `network/network_symbology*.h`,
+  `network/infrastructure_entity_traits.h`, `map/core/map_network_types.h`.
+  The host builds the snapshot and fills `MapNetworkRenderSymbology` from its
+  own model and results; Render never sees hydraulic data.
+- `MapGlobeNetworkScene`, `MapGlobeRenderFrame`, the icon atlas (drawn in
+  code, no host resources).
 
 **Map data**
 

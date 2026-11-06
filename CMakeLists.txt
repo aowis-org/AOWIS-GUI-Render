@@ -522,6 +522,59 @@ if(AOWIS_RENDER_BUILD_GLOBE_TERRAIN)
     endif()
 endif()
 
+# The network render contract (network/*.h, map/core/map_network_types.h:
+# render snapshot, symbology settings and ramps, entity kinds) and the CPU
+# side of the globe network: retained globe network scene (pipes, junction
+# impostors, icons, models, chevrons, X-Ray runs, demand-point drape),
+# render frame, icon atlas, resolved symbology data. The host fills the
+# snapshot and the symbology (the GUI from its hydraulic data).
+option(AOWIS_RENDER_BUILD_GLOBE_NETWORK
+    "Build the globe network scene (Qt6 Gui, RenderGlobeTerrain, RenderNetwork, GeographicLib)"
+    ${AOWIS_RENDER_BUILD_GLOBE_TERRAIN})
+if(AOWIS_RENDER_BUILD_GLOBE_NETWORK AND NOT (AOWIS_RENDER_BUILD_GLOBE_TERRAIN
+        AND AOWIS_RENDER_BUILD_NETWORK_SCENE))
+    message(FATAL_ERROR "AOWIS_RENDER_BUILD_GLOBE_NETWORK requires "
+        "AOWIS_RENDER_BUILD_GLOBE_TERRAIN and AOWIS_RENDER_BUILD_NETWORK_SCENE")
+endif()
+if(AOWIS_RENDER_BUILD_GLOBE_NETWORK)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui)
+    add_library(aowis-render-globe-network STATIC
+        src/map/core/map_network_types.h
+        src/network/infrastructure_entity_traits.h
+        src/network/network_render_snapshot.h
+        src/network/network_symbology.h
+        src/network/network_symbology_rendering.h
+        src/map/render/map_render_types.h
+        src/map/render/map_label_settings.h
+        src/map/render/map_tile_streaming_policy.h
+        src/map/render/map_network_render_data.h
+        src/map/render/map_network_render_symbology.h
+        src/map/render/map_retained_network_scene.h
+        src/map/render/map_globe_icon_draw_order.h
+        src/map/render/map_icon_atlas.h
+        src/map/render/map_icon_atlas.cpp
+        src/map/render/map_globe_network_scene.h
+        src/map/render/map_globe_network_scene.cpp
+        src/map/render/map_globe_render_frame.h
+        src/map/render/map_globe_render_frame.cpp)
+    add_library(AOWIS::RenderGlobeNetwork ALIAS aowis-render-globe-network)
+    target_compile_features(aowis-render-globe-network PUBLIC cxx_std_20)
+    target_include_directories(aowis-render-globe-network PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(aowis-render-globe-network
+        PUBLIC Qt6::Core Qt6::Gui AOWIS::RenderView AOWIS::RenderGlobeTerrain
+               AOWIS::RenderGlobe AOWIS::RenderNetwork
+        PRIVATE GeographicLib_STATIC)
+
+    if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
+        add_executable(aowis-render-globe-network-tests tests/render_globe_network_test.cpp)
+        target_link_libraries(aowis-render-globe-network-tests PRIVATE AOWIS::RenderGlobeNetwork)
+        add_test(NAME aowis-render-globe-network COMMAND aowis-render-globe-network-tests)
+        set_tests_properties(aowis-render-globe-network PROPERTIES
+            LABELS "aowis;integration" ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
+endif()
+
 # Exactly one bgfx target per process. GUI creates it here using its existing
 # pinned vendor sources; Mobile supplies its already-pinned bgfx.cmake target.
 # Nothing is fetched during configure.

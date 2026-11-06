@@ -86,4 +86,24 @@ for relative in ['src/services/interface_server_map.h', 'src/map/data/map_tile_r
     assert "MapServerMode" not in text and "AOWIS_STANDALONE" not in text, relative
     assert "mapProviderCatalog" not in text and "guiConfiguration" not in text, relative
     assert not re.search(r"\bauto\s+\w", text), relative
+# Network render contract and globe network scene: Render-owned, no hydraulic data.
+assert "add_library(aowis-render-globe-network STATIC" in cmake and "AOWIS::RenderGlobeNetwork" in cmake
+for relative in ['src/map/core/map_network_types.h', 'src/network/infrastructure_entity_traits.h', 'src/network/network_render_snapshot.h', 'src/network/network_symbology.h', 'src/network/network_symbology_rendering.h', 'src/map/render/map_render_types.h', 'src/map/render/map_label_settings.h', 'src/map/render/map_tile_streaming_policy.h', 'src/map/render/map_network_render_data.h', 'src/map/render/map_network_render_symbology.h', 'src/map/render/map_retained_network_scene.h', 'src/map/render/map_globe_icon_draw_order.h', 'src/map/render/map_icon_atlas.h', 'src/map/render/map_icon_atlas.cpp', 'src/map/render/map_globe_network_scene.h', 'src/map/render/map_globe_network_scene.cpp', 'src/map/render/map_globe_render_frame.h', 'src/map/render/map_globe_render_frame.cpp']:
+    text = (root / relative).read_text()
+    for included in re.findall(r'#include\s+"([^"]+)"', text):
+        assert included.startswith("aowis/model/") or (root / "src" / included).is_file(), \
+            relative + " includes " + included
+    assert "HydraulicData" not in text and "hydraulic_data.h" not in text, relative
+    assert not re.search(r"\bauto\s+\w", text), relative
+# The globe network scene keeps using the shared flow / link / underground /
+# invalidation code (formerly checked by the GUI's boundary test).
+globe_scene = (root / "src/map/render/map_globe_network_scene.cpp").read_text()
+assert not re.search(r"FlowDirection(SpacingPixels|ChevronHalfWidthRatio|MaximumMarkersPerLink)|MapGlobeNetworkScene::ellipsoidNormalAt", globe_scene)
+assert "longLinkSubdivisionCount" not in globe_scene
+assert not re.search(r"UndergroundSubdivision(FallbackTargetLengthM|MinimumTargetLengthM|TerrainCellFraction|MaximumCount)", globe_scene)
+for token in ["MapGlobeFlowGeometry::emitStrokes(", "MapGlobeLinkGeometry::emitCurvedSegments",
+              "MapGlobeLinkGeometry::emitRibbonCorners", "MapGlobeUndergroundGeometry::subdivisionCount(",
+              "MapGlobeUndergroundGeometry::emitBuriedRuns(", "MapGlobeSceneSync::forSymbology(changes)",
+              "applySceneInvalidation("]:
+    assert token in globe_scene, token
 print("Renderer extraction and shader-family contract: OK")
