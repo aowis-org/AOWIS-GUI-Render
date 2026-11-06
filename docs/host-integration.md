@@ -1,73 +1,115 @@
-# Renderer host and lifecycle contracts
+# Integrating the shared renderer
 
-| Owner | Desktop GUI | Mobile |
-|---|---|---|
-| bgfx target | Lean AOWIS unity build via Render CMake | Pinned `bgfx.cmake` target supplied to Render |
-| Render thread | GUI/map submission thread | Qt Quick scene-graph render thread |
-| External window | `BgfxQtNativeSurface` from live `QWindow` | Borrowed EGL context from `QOpenGLContext` |
-| Shared library | `AOWIS::RenderCore`, `AOWIS::RenderGeometry` | `AOWIS::RenderDevice`, `AOWIS::RenderGeometry` |
-| Map geometry | Common Mercator camera, icon index, terrain height cache and imagery UV | Same renderer-owned algorithms, without GUI/model dependencies |
-| Frame semantics | `BgfxFrameCoordinator` / ordinary `bgfx::frame()` | Qt owns swap; `bgfx::frame(BGFX_FRAME_FLUSH)` |
-| Shaders | Embedded renderer-map resources | Mobile demo's pinned sample shaders |
+This is the current host contract, not a promise that all production Maps
+surfaces are available through a single engine object yet.
 
-RenderGeometry exposes Qt/bgfx-free production map geometry for both hosts.
-RenderDevice owns the bgfx device generation and retirement guards in both
-apps. Qt-specific adapters stay on the host side. Mobile still uses one
-independent scene (stress-test GPU geometry), not the production 3D globe.
+## Hosts and build targets
 
-The next extraction boundary is not `MapBgfxSurface` wholesale: first separate
-scene construction, rendering commands, editor labels/HUD inputs and host
-callbacks, then give Mobile a stable neutral scene API. Check Linux OpenGL,
-Vulkan, WebAssembly, Android GLES, resize, context loss/recreation and D24S8
-before removing the fallback scene or consolidating the pinned vendor versions.
+| Contract | AOWIS-SERVER-GUI | AOWIS-GUI-Mobile |
+| --- | --- | --- |
+| Toolkit | Qt Widgets / native `QWindow`; WebAssembly canvas hosted by GUI | Qt Quick / Android EGL |
+| Shared device | `AOWIS::RenderDevice` | `AOWIS::RenderDevice` |
+| Shared geometry | `AOWIS::RenderGeometry`, plus production `RenderNetwork`/`RenderGlobe` used by GUI | Low-level geometry/device integration; production globe/terrain integration deferred |
+| GPU library | `AOWIS::RenderCore` | Production Map GPU core not yet integrated |
+| bgfx source | Host-supplied pinned bx/bimg/bgfx target via Render | Pinned bgfx.cmake target, supplied by Mobile |
+| Native surface | GUI `BgfxQtNativeSurface` adaptor | Qt Quick borrowed EGL context |
+| Present | `BgfxFrameCoordinator` coordinates all registered native clients | Qt Quick owns swap; borrowed-context path uses `bgfx::frame(BGFX_FRAME_FLUSH)` |
 
-## Production 2D network scene and draw submission
+The GUI pins Render at `external/AOWIS-GUI-Render`. To advance a GUI checkout
+**after publishing Render**:
 
-`AOWIS::RenderNetwork` owns `MapBgfx2dSceneVariants`, `MapBgfx2dMesh`
-and node decluttering (Qt6 Core only, no GPU required). Both desktop and Mobile
-can prepare and cull the same production network scene. `AOWIS::RenderCore`
-adds `MapBgfx2dGpu` (immutable chunk buffers and shader draw submission).
-Inputs are `MapBgfx2dNetworkInput`, containing render IDs, class codes and WGS84
-geometry only. The GUI adapts `MapRetainedNetworkScene` via
-`map_bgfx_2d_snapshot_adapter.h` only on geometry changes or first-time
-variant preparation; simulation data and UI state never enter Render.
-The renderer binds shader entity data using `MapBgfx2dStyleBinding`, implemented
-by the GUI `MapBgfxEntityStyle`. Qt Quick/Android can implement the same binding
-without including GUI model headers. The host still owns the native surface and
-frame loop; the renderer only uploads and submits scene draw calls.
+```sh
+cd ~/coding/aowis/AOWIS-SERVER-GUI
+./git_submodule_update.sh --render
+./tools/verify_render_checkout.sh
+./compile_linux_tests.sh
+```
 
-Mobile enables `AOWIS_RENDER_BUILD_NETWORK_SCENE=ON` and tests the shared
-scene/mesh contract today, while keeping `AOWIS_RENDER_BUILD_MAP_CORE=OFF`
-until its production GPU scene integration. The GPU core requires Qt6 Gui and
-the AOWIS shader pack; RenderGeometry remains entirely Qt-free.
+The GUI's test entry point builds the full application and all tests before
+CTest. Its `AOWIS_RENDER_SOURCE_DIR` override is for explicit development
+only; no sibling repository is selected implicitly. CMake must be regenerated
+when Render adds production source files.
 
-## Globe model mesh ownership
+A standalone Render checkout uses:
 
-`AOWIS::RenderGlobe` generates production 3D tank and reservoir mesh
-vertices from renderer-owned globe instance layouts. It needs Qt6 Gui only;
-no bgfx, MODEL or GUI sources are linked into this target. GUI remains the
-reference host for rendering and provides material images from its existing
-Qt resources (`:/map-3d/`) through `map_bgfx_globe_model_images.cpp`.
-The shared `MapBgfxGlobeGpu`, `MapBgfxGlobeBufferPool` and
-`MapBgfxGlobeResourcePool` own globe-network draw submission, buffers,
-shader programs, uniforms and GPU material textures. The desktop GUI retains
-scene preparation, picking and the Qt resource image paths;
-`mapBgfxGlobeMipTexture()` builds premultiplied mip levels in Render. Call
-both pools' `release()` before bgfx shutdown or device reinitialization.
-Globe terrain scene preparation remains in the desktop host.
+```sh
+./git_submodule_init.sh
+./compile_linux.sh
+./compile_linux_tests.sh
+```
 
-## 3D Globe CPU scene geometry
+A no-Qt geometry-only configuration (without bgfx vendor sources) is supported:
 
-`AOWIS::RenderGlobe` owns `MapGlobeFlowGeometry`, the production WGS84
-flow-chevron placement and tank/reservoir tangent-frame mathematics. The
-host supplies neutral retained-ECEF paths, camera pixels-per-meter,
-WGS84 anchor/radii, and a `bool` distinguishing pipe from non-pipe marker
-placement. Render emits both flow orientations so simulation steps can
-continue selecting the direction entirely through GPU entity styles.
-The host still converts neutral strokes into its existing shader vertex
-format and owns hydraulic entity ids, picking, and scene synchronization.
+```sh
+cmake -S . -B build-geometry -G Ninja \
+  -DAOWIS_RENDER_BUILD_DEVICE=OFF \
+  -DAOWIS_RENDER_BUILD_MAP_CORE=OFF \
+  -DAOWIS_RENDER_BUILD_NETWORK_SCENE=OFF \
+  -DAOWIS_RENDER_BUILD_GLOBE_MODELS=OFF \
+  -DAOWIS_RENDER_BUILD_GEOMETRY_TESTS=ON
+cmake --build build-geometry -j 8 && \
+  ctest --test-dir build-geometry --output-on-failure
+```
 
-The standalone no-Qt mock-geometry regression compiles the **production**
-`map_globe_flow_geometry.cpp`; a separate Qt test exercises the same API
-when Qt6 Gui is available. Link `AOWIS::RenderGlobe` for every application
-or test target compiling GUI's `map_globe_network_scene.cpp`.
+This covers pure geometry and recording-mock tests, **not** the Qt/bgfx
+production libraries. For production, `RenderCore` transitively requires
+`RenderNetwork`, `RenderGlobe` and `RenderDevice`; the normal standalone
+scripts enable them.
+
+## Neutral network inputs and GPU responsibilities
+
+- `MapBgfx2dNetworkInput` contains renderer IDs, class codes and WGS84
+  geometry, not hydraulic MODEL objects. GUI converts its retained network
+  snapshot through `map_bgfx_2d_snapshot_adapter.h`.
+- `MapBgfx2dStyleBinding` maps host-owned symbology to the production shader
+  binding. Camera or simulation updates should not rebuild network geometry.
+- `MapGlobeSceneSync` computes which 3D CPU geometry streams must change;
+  GUI owns the retained snapshot/index and executes rebuilds.
+- `MapGlobeLinkGeometry`, `MapGlobeFlowGeometry` and
+  `MapGlobeUndergroundGeometry` perform reusable tessellation/classification
+  without network MODEL dependencies. GUI supplies geodesic samples, terrain
+  queries, render IDs and GPU-vertex conversion.
+- Globe network buffers/resources, terrain index and vertex pools, terrain
+  draw commands, sky and heatmap GPU submissions live in Render.
+- Tank and reservoir material images are currently supplied by GUI Qt
+  resources (`:/map-3d/`); Render owns their GPU textures/mips.
+
+The **remaining engine-neutral map pipeline**—DEM decoding, LOD selection,
+terrain mesh scheduling, tile streaming, imagery lookup, shared caching and
+terrain picking queries—is mapped in [Map-engine boundary](map-engine-boundary.md).
+Do not introduce server/network or editor callbacks into GPU-only targets.
+
+## GPU lifecycle and platform rules
+
+- One `BgfxDeviceManager` / bgfx runtime per process. Register secondary
+  clients before acquiring GPU resources or view/target reservations.
+- The frame coordinator hands out **process-global**, generation-scoped view
+  IDs and batches submissions before one native `bgfx::frame()`.
+- Retire clients, GPU pools, view IDs and swapchains before the owning surface
+  is destroyed. A stale device generation invalidates handles and view IDs.
+- `BgfxNativeSurface` is toolkit-neutral; GUI captures the native display,
+  window, type and physical size. A secondary target resizes independently;
+  do not reset the whole device for an ordinary secondary resize.
+- Use D24S8 for 3D primary/secondary targets. Missing depth causes terrain
+  skirts to overdraw near terrain; skirts themselves remain needed for seams.
+- The Mobile Qt Quick scene graph controls context and swap, and is not
+  entitled to a second bgfx device.
+- Keep embedded shader paths `:/aowis/map/bgfx/<family>/<shader>.bin` stable.
+  Normal builds use committed shaders; `AOWIS_BGFX_SHADER_TOOLS=ON` is an
+  explicit shader-regeneration option, not a build prerequisite.
+
+## Practical verification
+
+1. Run both standalone Render build scripts; never run CTest after a failed
+   build. Include the production-library link test, not only mock tests.
+2. Run GUI's `./compile_linux_tests.sh`: application **and** tests compile and
+   link before CTest. Also run the extraction boundary and checkout verifier.
+3. Exercise native OpenGL and Vulkan: 2D/3D switching, terrain LOD/skirt
+   boundaries, cap/wireframe, X-Ray, models, sky, heatmap, tile replacement,
+   GPU teardown/recreation, resize and input-focus loss.
+4. Qualify WebAssembly and Android independently; passing Linux tests does
+   not establish their GPU/runtime behavior.
+
+The GUI's `docs/rendering-architecture.md` (in the separate
+`AOWIS-SERVER-GUI` repository) documents the single shared Maps viewport,
+Projects graph and host event routing.

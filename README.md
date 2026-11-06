@@ -1,258 +1,167 @@
 # AOWIS-GUI-Render
 
-Shared bgfx renderer components for AOWIS-SERVER-GUI (Qt Widgets/WebAssembly)
-and AOWIS-GUI-Mobile (Qt Quick/Android/Linux).
+Shared map-rendering code for AOWIS. This is an **independently buildable
+repository**, consumed as a pinned Git submodule by the desktop GUI. It provides
+production 2D network and 3D globe GPU components, geometry, and the shared
+bgfx device lifecycle. It is **not yet a complete, host-independent map engine**:
+terrain preparation, network and imagery repositories, and frame orchestration
+still have desktop-GUI owners.
 
-## Standalone Linux build (Ninja)
+The planned consumers are `AOWIS-SERVER-GUI` (Qt Widgets, native Linux and
+WebAssembly) and `AOWIS-GUI-Mobile` (Qt Quick/Android). The Mobile renderer
+currently uses the shared low-level device/geometry contracts, **not** the
+production desktop globe scene. Mobile integration is deliberately deferred
+until the shared engine boundary is stable.
 
-Render owns its dependencies. For an existing GUI checkout, register exactly
-that GUI's **pinned** bgfx/bimg/bx revisions once in the Render repository:
+## Build on Linux
 
-```sh
-./tools/bootstrap_vendor_submodules.sh ../AOWIS-SERVER-GUI
-# Review the staged .gitmodules and 160000 gitlinks, then commit and push them.
-```
-
-All subsequent Render clones work without any GUI checkout:
+A fresh clone needs its pinned `bx`, `bimg`, and `bgfx` submodules:
 
 ```sh
 ./git_submodule_init.sh
-./compile_linux.sh           # Release: build/link all production Render libraries
-./compile_linux_tests.sh     # Release: build/link all targets first; only then CTest
-# Both accept --debug; AOWIS_BUILD_JOBS=8 and AOWIS_LINUX_LINKER=lld|system.
+./compile_linux.sh
+./compile_linux_tests.sh
 ```
 
-The standalone Ninja build scripts use separate `build-linux` and
-`build-linux-tests` directories; they never run a GUI program. The test script
-**never runs CTest when configuration, compilation or linking fails**.
-`bash tests/test_linux_compile_scripts.sh` checks that failure gate without
-building native dependencies. The manual CMake equivalent is:
+- `compile_linux.sh`: configure and build production libraries with Ninja;
+  **does not launch an application or run CTest**.
+- `compile_linux_tests.sh`: configure and build **all library and test targets
+  first**, then run CTest only after successful compilation and linking. A
+  failed build cannot produce a false pass from stale test executables.
+- Both accept `--debug` or `--release` (default). They use separate
+  `build-linux` and `build-linux-tests` directories.
+- `AOWIS_BUILD_JOBS=8` selects build parallelism; `AOWIS_LINUX_LINKER=lld`
+  (default) or `system` selects the linker. LLD must be installed for the
+  default configuration.
 
-```sh
-git submodule update --init --recursive   # or ./git_submodule_init.sh
-cmake -S . -B build-linux-manual-tests -G Ninja -DCMAKE_BUILD_TYPE=Release \
-  -DBUILD_TESTING=ON -DAOWIS_RENDER_BUILD_GEOMETRY_TESTS=ON
-cmake --build build-linux-manual-tests -j 8 && \
-  ctest --test-dir build-linux-manual-tests --output-on-failure
-```
+Required: CMake 3.21+, Ninja, a C++20 toolchain, Qt 6 Core/Gui development
+packages, and the graphics dependencies of the selected bgfx backends.
+No shader tool download is needed for normal builds; compiled shader resources
+are included. For the geometry-only, no-Qt build configuration, see
+[Build and host integration](docs/host-integration.md).
 
-Requires CMake 3.21+, Ninja, C++20, Qt6 Core and Gui development packages,
-and the native libraries required by the enabled bgfx backends. This builds
-`RenderGeometry`, `RenderNetwork`, `RenderGlobe`, `RenderDevice`, `RenderCore`, the selected
-shader resources and standalone tests. The core-link test checks shader
-registration and device linkage without a display or GPU.
+The first vendoring setup in a new Render repository may use
+`./tools/bootstrap_vendor_submodules.sh ../AOWIS-SERVER-GUI` to register the
+GUI's pinned revisions. Ordinary clones and builds should **not** run that
+bootstrap step. No dependency is fetched during CMake configuration.
 
-A parent such as GUI can still provide its own **single** `bgfx` CMake target
-and `AOWIS_RENDER_VENDOR_ROOT`, keeping its pinned sources and avoiding a
-second runtime. The standalone Render vendoring is not compiled in that case.
+## Public CMake targets
 
-For geometry-only builds without Qt or vendor checkouts, explicitly disable
-`AOWIS_RENDER_BUILD_DEVICE`, `AOWIS_RENDER_BUILD_MAP_CORE` and
-`AOWIS_RENDER_BUILD_NETWORK_SCENE`.
+| Target | Runtime dependencies | Responsibility |
+| --- | --- | --- |
+| `AOWIS::RenderGeometry` | C++20 only | Projections, camera helpers, icon index, terrain-height cache, imagery UV fallback, draw-plan contracts |
+| `AOWIS::RenderNetwork` | Qt6 Core, RenderGeometry | Production 2D network scene variants and CPU mesh staging |
+| `AOWIS::RenderGlobe` | Qt6 Gui, RenderGeometry | 3D network/model/flow/link/underground geometry, terrain topology, scene invalidation policy |
+| `AOWIS::RenderDevice` | bgfx and RenderGeometry | Device generation, client retirement, view/frame coordination and swapchains |
+| `AOWIS::RenderCore` | Qt6 Gui, bgfx, other Render targets | Production 2D and 3D GPU uploads/draws, texture atlases, buffers, shader resources and HUD cache |
 
-## Current libraries
+`RenderCore` requires the device, 2D scene and globe targets. Render may build
+its own pinned bgfx target, or a parent can supply **one existing `bgfx`
+CMake target**. It must never create a second bgfx runtime in the process.
+Normal GUI builds embed Render with `AOWIS_RENDER_BUILD_MAP_CORE=ON`.
 
-- `AOWIS::RenderDevice` / `aowis-render-device`: Qt-independent, process-wide
-  bgfx initialization and retirement, native surface descriptors, multi-view
-  reservations and swapchain target registry. Both hosts use this library.
-- `AOWIS::RenderCore` / `aowis-render-core`: desktop map GPU uploaders,
-  imagery atlas, HUD text/texture cache and embedded map shader resources.
-  Built when `AOWIS_RENDER_BUILD_MAP_CORE=ON`; used by the GUI.
-- Pinned bx/bimg/bgfx can be **provided by the parent CMake project** as one
-  `bgfx` target (Mobile), or built through `cmake/aowis_bgfx.cmake` with
-  `AOWIS_RENDER_VENDOR_ROOT` containing `bx/`, `bimg/` and `bgfx/` (GUI).
-  No source downloads occur during configure.
+All committed shader families use the existing resource convention
+`:/aowis/map/bgfx/<family>/<shader>.bin`. `MapBgfxBackend` initializes the
+registered resources without source-level dependency on GUI resource files.
 
-All original map shader binaries are preserved, including GL, GLES/WebGL 2,
-Vulkan, D3D11 and Metal families. Qt resource paths remain
-`:/aowis/map/bgfx/<family>/<shader>.bin` and are registered by the library.
+## What Render currently owns
 
-## Production geometry shared between desktop and Mobile
+**Device and 2D**
 
-- `AOWIS::RenderGeometry` is a **Qt-, bgfx-, and model-free** header-only
-  target: continuous Web Mercator projection, secondary-view camera, globe
-  icon spatial indexing, terrain-height query cache, and globe imagery tile
-  fallback UV coordinates. The implementation is moved from GUI, not copied.
-- `MapBgfxPanReuse` is now in RenderCore because its screen-space HUD reuse
-  types use Qt Core. GUI remains its host and controls pan/content invalidation.
-- Configure and run the standalone geometry regressions without any Qt/bgfx
-  checkout:
+- Process-wide bgfx device/target management: `BgfxDeviceManager`,
+  `BgfxFrameCoordinator`, `BgfxNativeTargetRegistry`, `BgfxNativeSurface`.
+- Web Mercator/camera math, 2D network scene/mesh and 2D GPU submission.
+- 2D imagery atlas/upload support, style-binding interface, HUD texture/text
+  cache and shader resources.
 
-  ```sh
-  cmake -S . -B build-geometry -DAOWIS_RENDER_BUILD_DEVICE=OFF \
-      -DAOWIS_RENDER_BUILD_MAP_CORE=OFF -DAOWIS_RENDER_BUILD_GEOMETRY_TESTS=ON
-  cmake --build build-geometry -j 8
-  ctest --test-dir build-geometry --output-on-failure
-  ```
+**3D hydraulic network**
 
-The production 2D network scene, mesh staging and GPU submission are in Render; GUI retains its hydraulic snapshot adapter and user-interaction logic.
+- Tank/reservoir model geometry and tangent basis; curved globe-link ribbons,
+  flow chevrons and terrain-aware buried-run classification.
+- CPU stream invalidation decisions (`MapGlobeSceneSync`); GUI still retains
+  the authoritative scene snapshot and decides when to execute the plan.
+- Globe draw ordering and Solid/X-Ray/Hide submissions; the thirteen dynamic
+  vertex streams, optional icon-order index stream, shader/uniform/model
+  texture pools and the five production vertex layouts.
 
-RenderGlobe owns retained Globe scene stream invalidation decisions through
-`MapGlobeSceneSync`. The GUI maps Qt/hydraulic symbology and selection state to
-neutral change flags and executes the resulting CPU rebuild plan. Visual-only
-snapshot revisions, camera movement and flow time steps do not rebuild ECEF
-network geometry; full geometry rebuilds subsume dependent stream updates.
-The Qt-free tests exercise the same compiled production planner and its
-production-library linkage. Retained snapshot/index storage, ECEF anchoring,
-terrain lookup and UI interactions remain in GUI.
+**3D terrain and overlays**
 
-Globe scene preparation is now being separated incrementally: RenderGlobe
-owns curved-link ECEF tessellation, six-vertex ribbon topology and tangent
-width directions, while the GUI supplies GeographicLib/geodetic sampling,
-terrain heights and shader vertex coloration. RenderGlobe also
-owns CPU flow-chevron placement (including both orientations, WGS84 surface
-normal, and model tangent basis), while GUI supplies hydraulic entity IDs,
-scene paths and shader-vertex adaptation. Mock-backend and real-Qt geometry
-regressions protect the 3D flow and model orientation math.
+- Shared tile-grid indices, skirt geometry and index-buffer pool
+  (`MapGlobeTileTopology`, `MapBgfxGlobeTileIndexPool`).
+- Window/cap/wireframe GPU vertex buffers and range-only DEM patch uploads
+  (`MapBgfxGlobeTerrainBufferPool`).
+- Terrain/cap/wireframe GPU programs and draw submission
+  (`MapBgfxGlobeTerrainGpu`); sky and heatmap GPU resources/submissions
+  (`MapBgfxGlobeSkyGpu`, `MapBgfxGlobeHeatmapGpu`).
+- Shared geometry helpers for icon placement, height caching and imagery
+  ancestor-tile UV fallback. **These helpers are not yet the full terrain
+  preparation, tile-streaming, or imagery-provider pipeline.**
 
-The first 3D extraction moves production tank and reservoir mesh generation,
-vertex/instance layouts, vertical transform, and globe surface vertex math
-into **`AOWIS::RenderGlobe`** (Qt6 Gui; no bgfx, GUI model, or platform host
-requirements). GUI continues supplying the existing `:/map-3d/*_albedo.png`
-texture resources through a small host adapter. Render now owns globe GPU
-draw submission, dynamic buffers, shader/uniform resources, and GPU model
-textures. Camera/model synchronization and terrain scene preparation remain in GUI;
-RenderCore owns the production globe vertex layouts.
+For the data path, remaining GUI owners and exact future boundary, read
+[Map-engine ownership and data pipeline](docs/map-engine-boundary.md). For
+usage from a host, see [Build and host integration](docs/host-integration.md).
 
-### Globe-network programs, uniforms and textures
+## What stays with the GUI today
 
-`MapBgfxGlobeResourcePool` is bgfx-only. It creates and owns eight linked
-shader programs (the shared backend supplies a loader), six frame uniforms,
-two samplers and two GPU material textures. The host passes tank/reservoir
-images; `mapBgfxGlobeMipTexture()` in Render converts `QImage` into the
-existing smooth, premultiplied RGBA8 mip chain. GPU upload uses the same
-clamped sampler flags and same `createTexture2D()` format as before. The
-shared icon atlas remains externally owned; it is never destroyed here.
+`MapBgfxSurface` and `MapBgfxGlobeSurface` are the desktop frame/scene
+orchestrators. The GUI also owns `MapGlobeSurfaceScene` (quadtree/LOD),
+`MapGlobeSurfacePreparation`, `MapTerrainMeshScheduler`, decoded terrain and
+imagery repositories, provider configuration and upstream request adapters.
+The GUI supplies GeographicLib/geodesic sampling, height data, network
+snapshot/IDs, picking and editor interaction, and the Qt/native/WebAssembly
+surface adapters. Moving these classes verbatim would introduce app services
+and `AOWIS-SERVER-MODEL` dependencies into Render; their engine-neutral
+algorithms and their host adapters must be separated first.
 
-Initialization rolls back partially created handles; `release()` is
-idempotent and must run before bgfx device shutdown. The pool populates the
-named program/uniform/texture slots consumed by `MapBgfxGlobeGpu`, without
-including desktop-model headers. The real GPU-resource implementation is
-compiled against a recording mock bgfx backend in the standalone Ninja
-regressions, including shader failures, partial allocations, and restarts.
+Backend-specific notes and renderer-owned versus host-owned resources are in
+[Host integration](docs/host-integration.md). The remaining **forward work**
+is in [Renderer roadmap](docs/roadmap.md); it is not a record of historic patch
+stages.
 
-## Host integration
+## Runtime contracts
 
-The GUI sets `AOWIS_RENDER_BUILD_MAP_CORE=ON`, provides its pinned upstream
-source root and links `AOWIS::RenderCore`. Its Qt Widgets/QWindow adapter,
-map controller, map/editor workflow and Projects UI stay in the GUI.
+1. **Exactly one bgfx device per process.** A new view does not call
+   `bgfx::init()` again. Device generation tokens, reserved view IDs and
+   client retirement protect shared resources.
+2. **GPU calls run on the owning render thread.** GUI and Mobile use different
+   toolkit lifecycle adapters; Mobile's Qt Quick scene graph retains control
+   of presentation.
+3. **Retire resources before native surface/device teardown.** Each GPU pool
+   releases its handles on the owning render thread; a restarted device needs
+   newly allocated handles.
+4. **Keep a D24S8 depth attachment** for primary/secondary 3D swapchains.
+   Terrain skirts conceal LOD seams but must not overdraw foreground terrain.
+5. **Keep geometry identity and elevation data in the host's domain model.**
+   No private hydraulic elevation model or duplicate editor state is
+   introduced by the renderer.
+6. **Do not confuse compilation with runtime acceptance.** GPU mock tests
+   validate submission and cleanup, but OpenGL/Vulkan/WebGL/Android visual
+   behavior and native surface restoration still require device testing.
 
-Mobile builds its existing pinned bgfx.cmake target, sets
-`AOWIS_RENDER_BUILD_MAP_CORE=OFF`, links `AOWIS::RenderDevice`, and initializes
-and shuts down its borrowed Qt Quick EGL context through the shared device
-manager. It intentionally retains `bgfx::frame(BGFX_FRAME_FLUSH)` and Qt Quick
-scene-graph ownership. No second bgfx runtime is added to either executable.
+## Verification and change workflow
 
-Both hosts pin `external/AOWIS-GUI-Render` as a Git submodule. Commit Render
-changes before advancing either host gitlink, then build against the newly
-pinned revision. No implicit sibling checkout selection.
+Render's test scripts validate production-source geometry and GPU code (with
+recording bgfx/Qt shims where appropriate), real-Qt library linkage, and
+shader resource registration. The desktop GUI's `./compile_linux_tests.sh`
+adds **full application compilation and linking before CTest**, so a failed
+GUI target cannot be hidden by green test binaries.
 
-## Safety contracts
+For a two-repository change:
 
-- One bgfx device per process; never instantiate a second `bgfx` target.
-- Only the owning render thread may invoke bgfx; on Mobile it is the Qt Quick
-  scene-graph render thread; on desktop it is the map/GUI render thread.
-- Retire device clients and GPU resources before destroying native surfaces.
-- Keep the D24S8 depth attachment for map swapchains/resizes: without it the
-  terrain skirts overdraw nearer terrain.
-- Shader regeneration (`-DAOWIS_BGFX_SHADER_TOOLS=ON`) is host-only and is not
-  required by normal builds.
+1. Apply and build the Render patch; run its tests.
+2. Commit and push the **actual Render Git tree**, checking newly added
+   `.cpp` and `.h` files are tracked (a source ZIP alone is not a Git commit).
+3. Update GUI's pinned `external/AOWIS-GUI-Render` gitlink, apply its adapter
+   patch and run its full build-gated test script.
+4. Exercise affected map features and both native backends where possible;
+   only then commit the GUI integration.
 
-## Extraction status
+`./tools/apply_patch.sh` accepts changed-file ZIP patches. Keep patch ZIPs
+limited to modified or added files, with fresh timestamps and repository-root
+paths. No compiled build directories belong in Git.
 
-The library boundary, device lifecycle, camera/projection/terrain geometry,
-production 2D network scene/mesh/draw submission, GPU uploaders and shader assets
-have been moved to this repository. The larger GUI-specific `MapBgfxSurface`,
-HUD text content/controller, 3D scene preparation, input routing and Projects
-DAG presentation have *not* been extracted. Moving them verbatim
-would introduce GUI services, widgets and application model dependencies into
-Mobile. A later step should isolate backend-neutral scene inputs and rendering
-from their GUI host, then replace Mobile's test geometry with that interface.
+## Documentation
 
-Use `./tools/apply_patch.sh` for incremental ZIP patches and
-`./tests/test_patch_tooling.sh` to validate ZIP patch tooling.
-
-### 3D globe-network GPU submission
-
-`MapBgfxGlobeGpu` (in `AOWIS::RenderCore`) owns the production globe
-network's pass order, bgfx vertex/index binding, per-draw uniforms,
-shader-compatible style binding, and GPU submissions. It does not access GUI
-hydraulic types, map widgets, camera controllers, or network snapshots.
-`MapBgfxGlobeDrawPass` is a Qt/bgfx-free, regression-tested description of
-Solid, X-Ray and Hide pass ordering. `MapBgfxGlobeBufferPool` owns GPU
-streams and `MapBgfxGlobeResourcePool` owns the eight shader programs,
-frame uniforms, samplers, and tank/reservoir material textures. GUI provides
-vertex layouts, scene data and material images, not GPU handle lifetimes.
-
-### Globe-network GPU buffer ownership
-
-`MapBgfxGlobeBufferPool` owns the thirteen dynamic vertex streams and the
-optional depth-ordered icon index buffer. The desktop host supplies its
-existing scene vertex layouts, vertex bytes, and icon ordering; Render
-allocates, reuses, uploads, and explicitly destroys the bgfx buffers. Empty
-streams preserve their allocation but report a zero draw count. `release()`
-must run before device teardown, and the same instance can upload again
-after device reinitialization. The shared `MapBgfxGlobeResourcePool` owns
-shader programs, uniforms and model-material textures.
-
-### Globe vertex-layout ownership
-
-`MapBgfxGlobeVertexLayouts` lives in `AOWIS::RenderCore` and defines all five
-production globe-network shader attribute layouts (link, node, icon, junction,
-model). The GUI supplies only the byte strides of its existing scene vertex
-structs. Render validates their strides before GPU allocation; GUI maintains
-compile-time offset checks for the shader-facing float prefixes. No GUI model
-headers are used by Render, and no second bgfx device is created.
-
-### Globe terrain-aware X-Ray classification
-
-`MapGlobeUndergroundGeometry` owns the X-Ray link subdivision policy (20 m
-fallback, half the smallest resolved terrain-cell size, 0.25 m minimum,
-128-subdivision cap) and merges classification samples into contiguous buried
-runs before GPU tessellation. This preserves dashed-stroke continuity. The
-host supplies its terrain queries, WGS84 geodesic coordinates and vertical
-transforms; no hydraulic MODEL or GeographicLib dependency enters Render.
-
-### Globe terrain topology and GPU index buffers
-
-`MapGlobeTileTopology` (`map_globe_tile_topology.h`) supplies the production
-64-cell DEM grid/index ABI and its four crack-masking skirt walls. The single
-process-lifetime, thread-safe index cache is independent of tile providers and
-terrain requests. `MapBgfxGlobeTileIndexPool` owns one bgfx 16-bit index
-buffer per used cell count and reuses it across all window tiles. The host
-continues to prepare vertex positions (including DEM sampling, normals and
-vertical exaggeration); invoke `release()` before bgfx device shutdown.
-
-### Terrain GPU vertex streams
-
-`MapBgfxGlobeTerrainBufferPool` owns the globe surface window, cap and wireframe
-dynamic vertex buffers and the caps' 32-bit index buffer. A host supplies
-vertex layouts and contiguous CPU data, while the pool performs full uploads
-and **range-only** DEM mesh updates through `patchWindow`. Retained-window
-counts and strides are checked before patching; failed updates request full
-reupload in the host. `release()` is required before bgfx device shutdown.
-The immutable per-resolution terrain/skirt index buffers remain in
-`MapBgfxGlobeTileIndexPool`.
-
-### Globe terrain GPU draw ownership
-
-`MapBgfxGlobeTerrainGpu` (`AOWIS::RenderCore`) owns the base globe terrain
-and wireframe shader programs, seven shared uniforms/samplers, two RGBA8
-fallback textures, and cap/tile/wireframe bgfx submission. It consumes only
-neutral bgfx handles and a five-vector frame uniform block. The host still
-prepares terrain tiles, DEM vertex patches, atlas rectangles, sky geometry,
-heatmap atlas baking and view ordering. Heatmap-composited terrain draws are
-submitted by Render with host-supplied heatmap program/texture/uniform handles.
-Release on the owning rendering thread before bgfx shutdown. The production
-implementation has a recording-bgfx mock test covering draw order, resource
-lifecycle, validation, and failure cleanup.
-
-### Globe sky and heatmap GPU resources
-
-`MapBgfxGlobeSkyGpu` and `MapBgfxGlobeHeatmapGpu` own the optional
-atmosphere and heatmap shader/uniform resources and draw submission. Sky uses a
-single static full-screen triangle. Heatmap atlas pages (four 2048² render
-textures, allocated on demand) and the transient clear/stamp passes belong to
-Render. The host supplies camera vectors and stamp vertices, chooses tile
-cells, tracks LRU/revisions, and maintains the 24-bakes-per-frame policy.
-Both owners support complete release/reinitialization on bgfx device changes.
+- [Map-engine ownership and data pipeline](docs/map-engine-boundary.md)
+- [Host build, linking and GPU lifecycle](docs/host-integration.md)
+- [Remaining renderer roadmap and acceptance gates](docs/roadmap.md)
