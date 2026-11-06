@@ -48,4 +48,10 @@ vertices from renderer-owned globe instance layouts. It needs Qt6 Gui only;
 no bgfx, MODEL or GUI sources are linked into this target. GUI remains the
 reference host for rendering and provides material images from its existing
 Qt resources (`:/map-3d/`) through `map_bgfx_globe_model_images.cpp`.
-Next extraction work will decouple globe GPU submission and terrain scenes.
+The shared `MapBgfxGlobeGpu`, `MapBgfxGlobeBufferPool` and
+`MapBgfxGlobeResourcePool` own globe-network draw submission, buffers,
+shader programs, uniforms and GPU material textures. The desktop GUI retains
+scene preparation, picking, vertex layouts and the Qt resource image paths;
+`mapBgfxGlobeMipTexture()` builds premultiplied mip levels in Render. Call
+both pools' `release()` before bgfx shutdown or device reinitialization.
+Globe terrain scene preparation remains in the desktop host.

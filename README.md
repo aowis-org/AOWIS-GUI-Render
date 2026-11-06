@@ -77,9 +77,27 @@ The first 3D extraction moves production tank and reservoir mesh generation,
 vertex/instance layouts, vertical transform, and globe surface vertex math
 into **`AOWIS::RenderGlobe`** (Qt6 Gui; no bgfx, GUI model, or platform host
 requirements). GUI continues supplying the existing `:/map-3d/*_albedo.png`
-texture resources through a small host adapter. Globe GPU draw submission,
-camera/model synchronization, terrain scene preparation, and GPU textures
-remain in GUI for subsequent extraction steps.
+texture resources through a small host adapter. Render now owns globe GPU
+draw submission, dynamic buffers, shader/uniform resources, and GPU model
+textures. Camera/model synchronization, vertex layout definitions and terrain
+scene preparation remain in GUI.
+
+### Globe-network programs, uniforms and textures
+
+`MapBgfxGlobeResourcePool` is bgfx-only. It creates and owns eight linked
+shader programs (the shared backend supplies a loader), six frame uniforms,
+two samplers and two GPU material textures. The host passes tank/reservoir
+images; `mapBgfxGlobeMipTexture()` in Render converts `QImage` into the
+existing smooth, premultiplied RGBA8 mip chain. GPU upload uses the same
+clamped sampler flags and same `createTexture2D()` format as before. The
+shared icon atlas remains externally owned; it is never destroyed here.
+
+Initialization rolls back partially created handles; `release()` is
+idempotent and must run before bgfx device shutdown. The pool populates the
+named program/uniform/texture slots consumed by `MapBgfxGlobeGpu`, without
+including desktop-model headers. The real GPU-resource implementation is
+compiled against a recording mock bgfx backend in the standalone Ninja
+regressions, including shader failures, partial allocations, and restarts.
 
 ## Host integration
 
@@ -129,9 +147,10 @@ network's pass order, bgfx vertex/index binding, per-draw uniforms,
 shader-compatible style binding, and GPU submissions. It does not access GUI
 hydraulic types, map widgets, camera controllers, or network snapshots.
 `MapBgfxGlobeDrawPass` is a Qt/bgfx-free, regression-tested description of
-Solid, X-Ray and Hide pass ordering. The GUI currently supplies buffer,
-program, texture and uniform handles and owns their lifetime; migrating
-resource allocation/scene synchronization is a separate later step.
+Solid, X-Ray and Hide pass ordering. `MapBgfxGlobeBufferPool` owns GPU
+streams and `MapBgfxGlobeResourcePool` owns the eight shader programs,
+frame uniforms, samplers, and tank/reservoir material textures. GUI provides
+vertex layouts, scene data and material images, not GPU handle lifetimes.
 
 ### Globe-network GPU buffer ownership
 
@@ -141,5 +160,5 @@ existing scene vertex layouts, vertex bytes, and icon ordering; Render
 allocates, reuses, uploads, and explicitly destroys the bgfx buffers. Empty
 streams preserve their allocation but report a zero draw count. `release()`
 must run before device teardown, and the same instance can upload again
-after device reinitialization. Programs, uniforms, and model-material textures
-remain a separate extraction step.
+after device reinitialization. The shared `MapBgfxGlobeResourcePool` owns
+shader programs, uniforms and model-material textures.

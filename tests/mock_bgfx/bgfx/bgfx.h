@@ -11,6 +11,8 @@
 #define BGFX_INVALID_HANDLE {static_cast<std::uint16_t>(0xffff)}
 #define BGFX_BUFFER_ALLOW_RESIZE 1u
 #define BGFX_BUFFER_INDEX32 2u
+#define BGFX_SAMPLER_U_CLAMP (std::uint64_t(1) << 22)
+#define BGFX_SAMPLER_V_CLAMP (std::uint64_t(1) << 23)
 #define BGFX_STATE_WRITE_RGB (std::uint64_t(1) << 0)
 #define BGFX_STATE_WRITE_A (std::uint64_t(1) << 1)
 #define BGFX_STATE_MSAA (std::uint64_t(1) << 2)
@@ -30,6 +32,8 @@ struct ProgramHandle { std::uint16_t idx; };
 struct UniformHandle { std::uint16_t idx; };
 struct TextureHandle { std::uint16_t idx; };
 struct VertexLayout {};
+struct TextureFormat { enum Enum { RGBA8 }; };
+struct UniformType { enum Enum { Mat4, Vec4, Sampler }; };
 struct Memory { std::vector<std::uint8_t> bytes; };
 
 template <typename Handle>
@@ -58,6 +62,16 @@ inline unsigned int destroyed_index_buffers = 0;
 inline unsigned int vertex_updates = 0;
 inline unsigned int index_updates = 0;
 inline unsigned int uploaded_bytes = 0;
+inline unsigned int created_uniforms = 0;
+inline unsigned int created_textures = 0;
+inline unsigned int destroyed_uniforms = 0;
+inline unsigned int destroyed_textures = 0;
+inline unsigned int destroyed_programs = 0;
+inline unsigned int created_texture_bytes = 0;
+inline unsigned int texture_mips = 0;
+inline std::uint64_t texture_flags = 0;
+inline int fail_uniform_after = -1;
+inline int fail_texture_after = -1;
 inline std::uint16_t next_handle = 100;
 inline void reset()
 {
@@ -75,6 +89,16 @@ inline void reset()
     vertex_updates = 0;
     index_updates = 0;
     uploaded_bytes = 0;
+    created_uniforms = 0;
+    created_textures = 0;
+    destroyed_uniforms = 0;
+    destroyed_textures = 0;
+    destroyed_programs = 0;
+    created_texture_bytes = 0;
+    texture_mips = 0;
+    texture_flags = 0;
+    fail_uniform_after = -1;
+    fail_texture_after = -1;
     next_handle = 100;
 }
 }
@@ -110,6 +134,31 @@ inline void update(DynamicIndexBufferHandle, std::uint32_t, const Memory *memory
     mock::uploaded_bytes += static_cast<unsigned int>(memory->bytes.size());
     delete memory;
 }
+inline UniformHandle createUniform(const char *, UniformType::Enum)
+{
+    if (mock::fail_uniform_after >= 0
+        && mock::created_uniforms >= static_cast<unsigned int>(mock::fail_uniform_after))
+        return {0xffff};
+    ++mock::created_uniforms;
+    return {mock::next_handle++};
+}
+inline TextureHandle createTexture2D(std::uint16_t, std::uint16_t, bool has_mips,
+                                     std::uint16_t, TextureFormat::Enum,
+                                     std::uint64_t flags, const Memory *memory)
+{
+    mock::created_texture_bytes += static_cast<unsigned int>(memory->bytes.size());
+    mock::texture_mips += has_mips ? 1u : 0u;
+    mock::texture_flags = flags;
+    delete memory;
+    if (mock::fail_texture_after >= 0
+        && mock::created_textures >= static_cast<unsigned int>(mock::fail_texture_after))
+        return {0xffff};
+    ++mock::created_textures;
+    return {mock::next_handle++};
+}
+inline void destroy(UniformHandle) { ++mock::destroyed_uniforms; }
+inline void destroy(TextureHandle) { ++mock::destroyed_textures; }
+inline void destroy(ProgramHandle) { ++mock::destroyed_programs; }
 inline void destroy(DynamicVertexBufferHandle) { ++mock::destroyed_vertex_buffers; }
 inline void destroy(DynamicIndexBufferHandle) { ++mock::destroyed_index_buffers; }
 inline void setVertexBuffer(std::uint8_t, DynamicVertexBufferHandle handle, std::uint32_t, std::uint32_t)
