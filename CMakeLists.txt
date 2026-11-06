@@ -113,6 +113,32 @@ if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
     add_test(NAME aowis-render-globe-flow-geometry-mock
         COMMAND aowis-render-globe-flow-geometry-mock-tests)
     set_tests_properties(aowis-render-globe-flow-geometry-mock PROPERTIES LABELS "aowis;geometry")
+    # Compile the real terrain topology/skirt implementation with mock Qt,
+    # then exercise the same GPU index pool against the recording bgfx stub.
+    add_executable(aowis-render-globe-tile-topology-mock-tests
+        src/map/render/map_globe_tile_topology.cpp
+        tests/render_globe_tile_topology_test.cpp)
+    target_link_libraries(aowis-render-globe-tile-topology-mock-tests PRIVATE
+        AOWIS::RenderGeometry)
+    target_include_directories(aowis-render-globe-tile-topology-mock-tests BEFORE PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mock_qt")
+    add_test(NAME aowis-render-globe-tile-topology-mock
+        COMMAND aowis-render-globe-tile-topology-mock-tests)
+    set_tests_properties(aowis-render-globe-tile-topology-mock PROPERTIES
+        LABELS "aowis;geometry")
+    add_executable(aowis-render-globe-tile-index-pool-mock-tests
+        src/map/bgfx/map_bgfx_globe_tile_index_pool.cpp
+        src/map/render/map_globe_tile_topology.cpp
+        tests/render_globe_tile_index_pool_mock_test.cpp)
+    target_link_libraries(aowis-render-globe-tile-index-pool-mock-tests PRIVATE
+        AOWIS::RenderGeometry)
+    target_include_directories(aowis-render-globe-tile-index-pool-mock-tests BEFORE PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mock_qt"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mock_bgfx")
+    add_test(NAME aowis-render-globe-tile-index-pool-mock
+        COMMAND aowis-render-globe-tile-index-pool-mock-tests)
+    set_tests_properties(aowis-render-globe-tile-index-pool-mock PROPERTIES
+        LABELS "aowis;rendering")
     # The same production retained-scene invalidation policy is exercised
     # without Qt, a GPU, or hydraulic model types.
     add_executable(aowis-render-globe-scene-sync-tests
@@ -183,6 +209,8 @@ endif()
 if(AOWIS_RENDER_BUILD_GLOBE_MODELS)
     find_package(Qt6 REQUIRED COMPONENTS Gui)
     add_library(aowis-render-globe STATIC
+        src/map/render/map_globe_tile_topology.h
+        src/map/render/map_globe_tile_topology.cpp
         src/map/render/map_globe_render_instances.h
         src/map/render/map_globe_vertical_transform.h
         src/map/render/map_globe_surface_vertex.h
@@ -207,6 +235,15 @@ if(AOWIS_RENDER_BUILD_GLOBE_MODELS)
     if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
         # Real Qt headers/production library linkage, in addition to the
         # Qt-free mock test registered at the top of this file.
+        # Real Qt and production RenderGlobe link, not only mocked headers.
+        add_executable(aowis-render-globe-tile-topology-tests
+            tests/render_globe_tile_topology_test.cpp)
+        target_link_libraries(aowis-render-globe-tile-topology-tests PRIVATE
+            AOWIS::RenderGlobe)
+        add_test(NAME aowis-render-globe-tile-topology
+            COMMAND aowis-render-globe-tile-topology-tests)
+        set_tests_properties(aowis-render-globe-tile-topology PROPERTIES
+            LABELS "aowis;geometry;integration")
         add_executable(aowis-render-globe-link-geometry-tests
             tests/render_globe_link_geometry_mock_test.cpp)
         target_link_libraries(aowis-render-globe-link-geometry-tests PRIVATE AOWIS::RenderGlobe)
@@ -288,6 +325,8 @@ if(AOWIS_RENDER_BUILD_MAP_CORE)
         src/map/bgfx/map_bgfx_globe_draw_plan.h
         src/map/bgfx/map_bgfx_globe_gpu.h
         src/map/bgfx/map_bgfx_globe_gpu.cpp
+        src/map/bgfx/map_bgfx_globe_tile_index_pool.h
+        src/map/bgfx/map_bgfx_globe_tile_index_pool.cpp
         src/map/bgfx/map_bgfx_globe_buffer_pool.h
         src/map/bgfx/map_bgfx_globe_buffer_pool.cpp
         src/map/bgfx/map_bgfx_globe_vertex_layouts.h
@@ -306,7 +345,8 @@ if(AOWIS_RENDER_BUILD_MAP_CORE)
     target_include_directories(aowis-render-core PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
     target_link_libraries(aowis-render-core PUBLIC
-        AOWIS::RenderDevice AOWIS::RenderGeometry AOWIS::RenderNetwork Qt6::Gui)
+        AOWIS::RenderDevice AOWIS::RenderGeometry AOWIS::RenderNetwork
+        AOWIS::RenderGlobe Qt6::Gui)
 
     if(NOT AOWIS_BGFX_RENDERERS)
         message(FATAL_ERROR

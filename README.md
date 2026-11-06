@@ -212,3 +212,13 @@ fallback, half the smallest resolved terrain-cell size, 0.25 m minimum,
 runs before GPU tessellation. This preserves dashed-stroke continuity. The
 host supplies its terrain queries, WGS84 geodesic coordinates and vertical
 transforms; no hydraulic MODEL or GeographicLib dependency enters Render.
+
+### Globe terrain topology and GPU index buffers
+
+`MapGlobeTileTopology` (`map_globe_tile_topology.h`) supplies the production
+64-cell DEM grid/index ABI and its four crack-masking skirt walls. The single
+process-lifetime, thread-safe index cache is independent of tile providers and
+terrain requests. `MapBgfxGlobeTileIndexPool` owns one bgfx 16-bit index
+buffer per used cell count and reuses it across all window tiles. The host
+continues to prepare vertex positions (including DEM sampling, normals and
+vertical exaggeration); invoke `release()` before bgfx device shutdown.

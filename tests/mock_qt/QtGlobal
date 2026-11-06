@@ -3,12 +3,15 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstddef>
 
 // Match Qt's signal keyword macro during mock compilation so identifiers
 // that collide with Qt (such as an "emit" callback) fail in this test too.
 #define emit
 
+using quint16 = std::uint16_t;
 using quint32 = std::uint32_t;
+using qsizetype = std::ptrdiff_t;
 
 template <typename T>
 const T &qMax(const T &left, const T &right)

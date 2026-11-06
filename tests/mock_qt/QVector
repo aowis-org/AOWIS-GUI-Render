@@ -8,6 +8,7 @@ class QVector : public std::vector<T>
 {
 public:
     using std::vector<T>::vector;
+    const T *constData() const { return this->data(); }
     bool isEmpty() const { return this->empty(); }
     void append(const T &value) { this->push_back(value); }
 };

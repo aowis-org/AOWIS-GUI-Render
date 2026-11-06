@@ -28,6 +28,7 @@ namespace bgfx
 using ViewId = std::uint16_t;
 struct DynamicVertexBufferHandle { std::uint16_t idx; };
 struct DynamicIndexBufferHandle { std::uint16_t idx; };
+struct IndexBufferHandle { std::uint16_t idx; };
 struct ProgramHandle { std::uint16_t idx; };
 struct UniformHandle { std::uint16_t idx; };
 struct TextureHandle { std::uint16_t idx; };
@@ -78,6 +79,9 @@ inline unsigned int texture_calls = 0;
 inline unsigned int index_calls = 0;
 inline unsigned int created_vertex_buffers = 0;
 inline unsigned int created_index_buffers = 0;
+inline unsigned int created_static_index_buffers = 0;
+inline unsigned int destroyed_static_index_buffers = 0;
+inline std::vector<std::uint8_t> last_static_indices;
 inline unsigned int destroyed_vertex_buffers = 0;
 inline unsigned int destroyed_index_buffers = 0;
 inline unsigned int vertex_updates = 0;
@@ -105,6 +109,9 @@ inline void reset()
     index_calls = 0;
     created_vertex_buffers = 0;
     created_index_buffers = 0;
+    created_static_index_buffers = 0;
+    destroyed_static_index_buffers = 0;
+    last_static_indices.clear();
     destroyed_vertex_buffers = 0;
     destroyed_index_buffers = 0;
     vertex_updates = 0;
@@ -128,6 +135,21 @@ inline DynamicVertexBufferHandle createDynamicVertexBuffer(std::uint32_t,
                                                           const VertexLayout &, std::uint16_t)
 {
     ++mock::created_vertex_buffers;
+    return {mock::next_handle++};
+}
+inline const Memory *makeRef(const void *data, std::uint32_t bytes)
+{
+    Memory *memory = new Memory;
+    memory->bytes.resize(bytes);
+    if (bytes > 0)
+        std::memcpy(memory->bytes.data(), data, bytes);
+    return memory;
+}
+inline IndexBufferHandle createIndexBuffer(const Memory *memory)
+{
+    ++mock::created_static_index_buffers;
+    mock::last_static_indices = memory->bytes;
+    delete memory;
     return {mock::next_handle++};
 }
 inline DynamicIndexBufferHandle createDynamicIndexBuffer(std::uint32_t, std::uint16_t)
@@ -182,6 +204,7 @@ inline void destroy(TextureHandle) { ++mock::destroyed_textures; }
 inline void destroy(ProgramHandle) { ++mock::destroyed_programs; }
 inline void destroy(DynamicVertexBufferHandle) { ++mock::destroyed_vertex_buffers; }
 inline void destroy(DynamicIndexBufferHandle) { ++mock::destroyed_index_buffers; }
+inline void destroy(IndexBufferHandle) { ++mock::destroyed_static_index_buffers; }
 inline void setVertexBuffer(std::uint8_t, DynamicVertexBufferHandle handle, std::uint32_t, std::uint32_t)
 {
     mock::current_vertex = handle.idx;
