@@ -139,6 +139,20 @@ if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
         COMMAND aowis-render-globe-tile-index-pool-mock-tests)
     set_tests_properties(aowis-render-globe-tile-index-pool-mock PROPERTIES
         LABELS "aowis;rendering")
+    # Real terrain vertex/index uploader compiled against recording bgfx.
+    # Covers sparse DEM mesh patches (offset and byte range), buffer reuse,
+    # invalid patches, complete replacement and device recreation.
+    add_executable(aowis-render-globe-terrain-buffer-pool-mock-tests
+        src/map/bgfx/map_bgfx_globe_terrain_buffer_pool.cpp
+        tests/render_globe_terrain_buffer_pool_mock_test.cpp)
+    target_link_libraries(aowis-render-globe-terrain-buffer-pool-mock-tests PRIVATE
+        AOWIS::RenderGeometry)
+    target_include_directories(aowis-render-globe-terrain-buffer-pool-mock-tests BEFORE PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mock_bgfx")
+    add_test(NAME aowis-render-globe-terrain-buffer-pool-mock
+        COMMAND aowis-render-globe-terrain-buffer-pool-mock-tests)
+    set_tests_properties(aowis-render-globe-terrain-buffer-pool-mock PROPERTIES
+        LABELS "aowis;rendering")
     # The same production retained-scene invalidation policy is exercised
     # without Qt, a GPU, or hydraulic model types.
     add_executable(aowis-render-globe-scene-sync-tests
@@ -327,6 +341,8 @@ if(AOWIS_RENDER_BUILD_MAP_CORE)
         src/map/bgfx/map_bgfx_globe_gpu.cpp
         src/map/bgfx/map_bgfx_globe_tile_index_pool.h
         src/map/bgfx/map_bgfx_globe_tile_index_pool.cpp
+        src/map/bgfx/map_bgfx_globe_terrain_buffer_pool.h
+        src/map/bgfx/map_bgfx_globe_terrain_buffer_pool.cpp
         src/map/bgfx/map_bgfx_globe_buffer_pool.h
         src/map/bgfx/map_bgfx_globe_buffer_pool.cpp
         src/map/bgfx/map_bgfx_globe_vertex_layouts.h

@@ -222,3 +222,14 @@ terrain requests. `MapBgfxGlobeTileIndexPool` owns one bgfx 16-bit index
 buffer per used cell count and reuses it across all window tiles. The host
 continues to prepare vertex positions (including DEM sampling, normals and
 vertical exaggeration); invoke `release()` before bgfx device shutdown.
+
+### Terrain GPU vertex streams
+
+`MapBgfxGlobeTerrainBufferPool` owns the globe surface window, cap and wireframe
+dynamic vertex buffers and the caps' 32-bit index buffer. A host supplies
+vertex layouts and contiguous CPU data, while the pool performs full uploads
+and **range-only** DEM mesh updates through `patchWindow`. Retained-window
+counts and strides are checked before patching; failed updates request full
+reupload in the host. `release()` is required before bgfx device shutdown.
+The immutable per-resolution terrain/skirt index buffers remain in
+`MapBgfxGlobeTileIndexPool`.

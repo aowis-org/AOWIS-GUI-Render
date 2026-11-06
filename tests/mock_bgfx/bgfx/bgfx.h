@@ -84,6 +84,14 @@ inline unsigned int destroyed_static_index_buffers = 0;
 inline std::vector<std::uint8_t> last_static_indices;
 inline unsigned int destroyed_vertex_buffers = 0;
 inline unsigned int destroyed_index_buffers = 0;
+struct BufferUpdate
+{
+    std::uint16_t handle = 0xffff;
+    std::uint32_t first_element = 0;
+    std::vector<std::uint8_t> bytes;
+};
+inline std::vector<BufferUpdate> vertex_update_history;
+inline std::vector<BufferUpdate> index_update_history;
 inline unsigned int vertex_updates = 0;
 inline unsigned int index_updates = 0;
 inline unsigned int uploaded_bytes = 0;
@@ -116,6 +124,8 @@ inline void reset()
     destroyed_index_buffers = 0;
     vertex_updates = 0;
     index_updates = 0;
+    vertex_update_history.clear();
+    index_update_history.clear();
     uploaded_bytes = 0;
     created_uniforms = 0;
     created_textures = 0;
@@ -165,14 +175,16 @@ inline const Memory *copy(const void *data, std::uint32_t bytes)
         std::memcpy(memory->bytes.data(), data, bytes);
     return memory;
 }
-inline void update(DynamicVertexBufferHandle, std::uint32_t, const Memory *memory)
+inline void update(DynamicVertexBufferHandle handle, std::uint32_t first, const Memory *memory)
 {
+    mock::vertex_update_history.push_back({handle.idx, first, memory->bytes});
     ++mock::vertex_updates;
     mock::uploaded_bytes += static_cast<unsigned int>(memory->bytes.size());
     delete memory;
 }
-inline void update(DynamicIndexBufferHandle, std::uint32_t, const Memory *memory)
+inline void update(DynamicIndexBufferHandle handle, std::uint32_t first, const Memory *memory)
 {
+    mock::index_update_history.push_back({handle.idx, first, memory->bytes});
     ++mock::index_updates;
     mock::uploaded_bytes += static_cast<unsigned int>(memory->bytes.size());
     delete memory;
