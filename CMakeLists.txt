@@ -690,6 +690,69 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND AOWIS_RENDER_BUILD_MAP_CORE)
     set_tests_properties(aowis-render-core-link PROPERTIES LABELS "aowis;integration")
 endif()
 
+# The bgfx map renderers above the GPU core: GPU network colouring
+# (MapBgfxEntityStyle), the globe network and globe terrain surfaces, 2D
+# symbology / picking / snapshot adapter, decluttered labels and the native
+# HUD (layout, input, legend). Host assets (model textures) and settings are
+# injected; window, input routing and the Qt Widgets surface stay with the
+# host.
+option(AOWIS_RENDER_BUILD_MAP
+    "Build the bgfx map renderers (RenderCore, RenderGlobeNetwork, RenderMapData)"
+    ${AOWIS_RENDER_BUILD_MAP_CORE})
+if(AOWIS_RENDER_BUILD_MAP AND NOT (AOWIS_RENDER_BUILD_MAP_CORE
+        AND AOWIS_RENDER_BUILD_GLOBE_NETWORK AND AOWIS_RENDER_BUILD_MAP_DATA))
+    message(FATAL_ERROR "AOWIS_RENDER_BUILD_MAP requires AOWIS_RENDER_BUILD_MAP_CORE, "
+        "AOWIS_RENDER_BUILD_GLOBE_NETWORK and AOWIS_RENDER_BUILD_MAP_DATA")
+endif()
+if(AOWIS_RENDER_BUILD_MAP)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui)
+    add_library(aowis-render-map STATIC
+        src/map/bgfx/map_bgfx_2d_snapshot_adapter.h
+        src/map/bgfx/map_bgfx_2d_symbology.h
+        src/map/bgfx/map_bgfx_2d_picking.h
+        src/map/bgfx/map_bgfx_layer_visibility.h
+        src/map/bgfx/map_bgfx_entity_style.h
+        src/map/bgfx/map_bgfx_entity_style.cpp
+        src/map/bgfx/map_bgfx_globe_network.h
+        src/map/bgfx/map_bgfx_globe_network.cpp
+        src/map/bgfx/map_bgfx_globe_surface.h
+        src/map/bgfx/map_bgfx_globe_surface.cpp
+        src/map/bgfx/map_bgfx_hud.h
+        src/map/bgfx/map_bgfx_hud.cpp
+        src/map/bgfx/map_bgfx_labels.h
+        src/map/bgfx/map_bgfx_labels.cpp)
+    add_library(AOWIS::RenderMap ALIAS aowis-render-map)
+    target_compile_features(aowis-render-map PUBLIC cxx_std_20)
+    target_include_directories(aowis-render-map PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(aowis-render-map PUBLIC
+        Qt6::Core Qt6::Gui AOWIS::RenderCore AOWIS::RenderGlobeNetwork
+        AOWIS::RenderGlobeTerrain AOWIS::RenderMapData AOWIS::RenderView)
+    if(EMSCRIPTEN AND AOWIS_WASM_SIMD)
+        target_compile_options(aowis-render-map PRIVATE -msimd128)
+    endif()
+
+    if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
+        # CPU sides only, no bgfx device: entity-style texels, 2D picking,
+        # layer visibility, HUD layout/input/legend, label placement.
+        foreach(aowis_render_map_test IN ITEMS
+                bgfx_entity_style bgfx_2d_picking map_bgfx_layer_visibility bgfx_hud bgfx_labels)
+            string(REPLACE "_" "-" aowis_render_map_test_name "${aowis_render_map_test}")
+            add_executable(aowis-render-${aowis_render_map_test_name}-tests
+                tests/${aowis_render_map_test}_test.cpp)
+            target_link_libraries(aowis-render-${aowis_render_map_test_name}-tests
+                PRIVATE AOWIS::RenderMap)
+            add_test(NAME aowis-render-${aowis_render_map_test_name}
+                COMMAND aowis-render-${aowis_render_map_test_name}-tests)
+            set_tests_properties(aowis-render-${aowis_render_map_test_name} PROPERTIES
+                LABELS "aowis;rendering" ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        endforeach()
+        # Full-viewport input sweeps are CPU-intensive: never concurrently,
+        # with a bounded timeout to detect genuine hangs.
+        set_tests_properties(aowis-render-bgfx-hud PROPERTIES RUN_SERIAL TRUE TIMEOUT 240)
+    endif()
+endif()
+
 # Every Render test carries the "aowis" label; compile_linux_tests.sh runs
 # only that label. A standalone build may also contain foreign tests
 # (GeographicLib registers tools/test programs it never builds here).

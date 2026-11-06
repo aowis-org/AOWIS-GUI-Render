@@ -63,6 +63,7 @@ builds.
 | `AOWIS::RenderGlobeTerrain` | Qt6 Gui, RenderView, RenderTerrainData, RenderGlobe | Globe terrain CPU pipeline: quadtree selection/LOD, surface preparation, mesh scheduler, terrain navigation, globe camera, heatmap scene; tiles from the host's `MapTerrainTileSource` |
 | `AOWIS::RenderMapData` | Qt6 Gui, RenderView, RenderTerrainData | Imagery and DEM tile repositories (scheduling, caches, decode workers, WASM browser decoder, dataset catalog, cache deletion) over the `InterfaceServerMap` contract; the host supplies a `MapServerTransport` |
 | `AOWIS::RenderGlobeNetwork` | Qt6 Gui, RenderGlobeTerrain, RenderNetwork, GeographicLib (private) | Network render contract (snapshot, symbology settings and ramps, entity kinds) and the globe network CPU side: retained globe network scene, render frame, icon atlas, resolved symbology data |
+| `AOWIS::RenderMap` | RenderCore, RenderGlobeNetwork, RenderMapData | bgfx map renderers: GPU network colouring, globe network and terrain surfaces, 2D symbology / picking, labels, native HUD (layout, input, legend) |
 | `AOWIS::RenderTerrainData` | Qt6 Core | Normalized 65×65 DEM tile decoder (v1 format), tile keys/endpoints, terrain dataset catalog |
 | `AOWIS::RenderNetwork` | Qt6 Core, RenderGeometry | Production 2D network scene variants and CPU mesh staging |
 | `AOWIS::RenderGlobe` | Qt6 Gui, RenderGeometry | 3D network/model/flow/link/underground geometry, terrain topology, scene invalidation policy |
@@ -97,6 +98,14 @@ registered resources without source-level dependency on GUI resource files.
   `MapImageryProviderDirectory` (change notifications via
   `providerCatalogChanged()` / `providerFallbackChanged()`), the orbit
   sensitivity as a getter (`setOrbitSensitivitySource()`).
+
+**bgfx map renderers**
+
+- `MapBgfxEntityStyle`, `MapBgfxGlobeNetwork` (model textures from the host:
+  `setModelImages()`), `MapBgfxGlobeSurface` (detail setting from the host:
+  `setTerrainDetailReductionSource()`), 2D symbology / picking / snapshot
+  adapter, `MapBgfxLabels`, `MapBgfxHud`. The Qt Widgets surface that owns
+  them (window, input routing) is still the GUI's `MapBgfxSurface`.
 
 **Network render contract**
 

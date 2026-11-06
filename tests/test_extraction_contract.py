@@ -106,4 +106,39 @@ for token in ["MapGlobeFlowGeometry::emitStrokes(", "MapGlobeLinkGeometry::emitC
               "MapGlobeUndergroundGeometry::emitBuriedRuns(", "MapGlobeSceneSync::forSymbology(changes)",
               "applySceneInvalidation("]:
     assert token in globe_scene, token
+# bgfx map renderers: Render-owned, host assets and settings injected.
+assert "add_library(aowis-render-map STATIC" in cmake and "AOWIS::RenderMap" in cmake
+for relative in ['src/map/bgfx/map_bgfx_2d_snapshot_adapter.h', 'src/map/bgfx/map_bgfx_2d_symbology.h', 'src/map/bgfx/map_bgfx_2d_picking.h', 'src/map/bgfx/map_bgfx_layer_visibility.h', 'src/map/bgfx/map_bgfx_entity_style.h', 'src/map/bgfx/map_bgfx_entity_style.cpp', 'src/map/bgfx/map_bgfx_globe_network.h', 'src/map/bgfx/map_bgfx_globe_network.cpp', 'src/map/bgfx/map_bgfx_globe_surface.h', 'src/map/bgfx/map_bgfx_globe_surface.cpp', 'src/map/bgfx/map_bgfx_hud.h', 'src/map/bgfx/map_bgfx_hud.cpp', 'src/map/bgfx/map_bgfx_labels.h', 'src/map/bgfx/map_bgfx_labels.cpp']:
+    text = (root / relative).read_text()
+    for included in re.findall(r'#include\s+"([^"]+)"', text):
+        assert included.startswith("aowis/model/") or (root / "src" / included).is_file(), \
+            relative + " includes " + included
+    assert "guiConfiguration" not in text and '":/' not in text, relative
+    assert not re.search(r"\bauto\s+\w", text), relative
+# bgfx globe network / surface keep using Render's GPU building blocks
+# (formerly checked by the GUI's boundary test).
+network = (root / "src/map/bgfx/map_bgfx_globe_network.cpp").read_text() + \
+    (root / "src/map/bgfx/map_bgfx_globe_network.h").read_text()
+surface = (root / "src/map/bgfx/map_bgfx_globe_surface.cpp").read_text() + \
+    (root / "src/map/bgfx/map_bgfx_globe_surface.h").read_text()
+surface_cpp = (root / "src/map/bgfx/map_bgfx_globe_surface.cpp").read_text()
+dynamic_buffers = r"Dynamic(Vertex|Index)BufferHandle|createDynamic(Vertex|Index)Buffer|bgfx::update\("
+assert not re.search(dynamic_buffers, network)
+assert not re.search(dynamic_buffers, surface)
+assert not re.search(r"this->(link|node|icon|junction|model)_layout", network)
+for token in ["gpu_buffers.populateInput(&draw_input)", "this->gpu_layouts.initialize(strides)",
+              "gpu_resources.populateInput(&draw_input)"] + [
+        "this->gpu_layouts.%s()" % layout for layout in ["link", "node", "icon", "junction", "model"]]:
+    assert token in network, token
+assert not re.search(r"bgfx::(createUniform|createTexture2D|destroy\()", network)
+assert not re.search(r"tile_index_buffers|MapBgfxGlobeSurface::tileIndexBuffer\(", surface)
+assert not re.search(r"this->(surface_program|wireframe_program|tile_sampler|view_projection_uniform|missing_texture|cap_texture|tile_uniform|background_uniform|origin_uniform|light_uniform|shading_uniform)", surface)
+assert not re.search(r"this->(sky_program|sky_triangle|sky_forward_uniform|heatmap_bake_program|heatmap_surface_program|heatmap_pages)|bgfx::createFrameBuffer\(|bgfx::allocTransientVertexBuffer\(", surface)
+for token in ["this->tile_index_pool.get(tile.grid_cell_count)", "this->terrain_buffers.patchWindow(",
+              "this->terrain_gpu.drawTile(", "this->terrain_gpu.drawCap(", "this->terrain_gpu.drawWireframe(",
+              "this->sky_gpu.initialize(", "this->sky_gpu.draw(", "this->heatmap_gpu.initialize(",
+              "this->heatmap_gpu.bakePage("]:
+    assert token in surface_cpp, token
+render_body = surface_cpp.split("MapBgfxGlobeSurface::FrameResult MapBgfxGlobeSurface::render(", 1)[1].split("// --- Heatmap", 1)[0]
+assert not re.search(r"bgfx::(setIndexBuffer|setVertexBuffer|submit)\(", render_body)
 print("Renderer extraction and shader-family contract: OK")
