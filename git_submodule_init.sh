@@ -6,11 +6,15 @@ if [[ ! -f "$root/.gitmodules" ]]; then
     printf 'Run: ./tools/bootstrap_vendor_submodules.sh /path/to/AOWIS-SERVER-GUI\n' >&2
     exit 1
 fi
-for dep in bx bimg bgfx; do
+deps=(bx bimg bgfx GeographicLib AOWIS-SERVER-MODEL)
+paths=()
+for dep in "${deps[@]}"; do
     if ! git -C "$root" ls-files --stage -- "external/$dep" | grep -q '^160000 '; then
         printf 'Missing Git submodule gitlink: external/%s\n' "$dep" >&2
+        printf 'Register it once with: ./tools/bootstrap_vendor_submodules.sh /path/to/AOWIS-SERVER-GUI\n' >&2
         exit 1
     fi
+    paths+=("external/$dep")
 done
-git -C "$root" submodule sync --recursive -- external/bx external/bimg external/bgfx
-git -C "$root" submodule update --init --recursive -- external/bx external/bimg external/bgfx
+git -C "$root" submodule sync --recursive -- "${paths[@]}"
+git -C "$root" submodule update --init --recursive -- "${paths[@]}"

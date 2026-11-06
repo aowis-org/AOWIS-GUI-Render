@@ -15,7 +15,8 @@ until the shared engine boundary is stable.
 
 ## Build on Linux
 
-A fresh clone needs its pinned `bx`, `bimg`, and `bgfx` submodules:
+A fresh clone needs its pinned `bx`, `bimg`, `bgfx`, `GeographicLib` and
+`AOWIS-SERVER-MODEL` submodules:
 
 ```sh
 ./git_submodule_init.sh
@@ -35,21 +36,30 @@ A fresh clone needs its pinned `bx`, `bimg`, and `bgfx` submodules:
   default configuration.
 
 Required: CMake 3.21+, Ninja, a C++20 toolchain, Qt 6 Core/Gui development
-packages, and the graphics dependencies of the selected bgfx backends.
+packages, Python 3 (MODEL's schema generator), and the graphics dependencies
+of the selected bgfx backends.
 No shader tool download is needed for normal builds; compiled shader resources
 are included. For the geometry-only, no-Qt build configuration, see
 [Build and host integration](docs/host-integration.md).
 
-The first vendoring setup in a new Render repository may use
-`./tools/bootstrap_vendor_submodules.sh ../AOWIS-SERVER-GUI` to register the
-GUI's pinned revisions. Ordinary clones and builds should **not** run that
-bootstrap step. No dependency is fetched during CMake configuration.
+Vendor gitlinks are registered once with
+`./tools/bootstrap_vendor_submodules.sh ../AOWIS-SERVER-GUI`, which copies the
+GUI's pinned revision of each dependency and leaves already registered ones
+alone (so it also adds dependencies introduced later, such as GeographicLib
+and MODEL). Ordinary clones and builds should **not** run that bootstrap
+step. No dependency is fetched during CMake configuration.
+
+`compile_linux_tests.sh` runs the tests labelled `aowis` only: a standalone
+build also contains GeographicLib's own CTest entries for tools it never
+builds.
 
 ## Public CMake targets
 
 | Target | Runtime dependencies | Responsibility |
 | --- | --- | --- |
 | `AOWIS::RenderGeometry` | C++20 only | Projections, camera helpers, icon index, terrain-height cache, imagery UV fallback, draw-plan contracts |
+| `AOWIS::RenderGeo` | Qt6 Gui, MODEL (`aowis/model/gis.h`), GeographicLib (private) | WGS84 ellipsoid/ECEF, orbit camera basis, screen rays, Web Mercator tile math, UTM and project-local metric coordinates |
+| `AOWIS::RenderTerrainData` | Qt6 Core | Normalized 65×65 DEM tile decoder (v1 format), tile keys/endpoints, terrain dataset catalog |
 | `AOWIS::RenderNetwork` | Qt6 Core, RenderGeometry | Production 2D network scene variants and CPU mesh staging |
 | `AOWIS::RenderGlobe` | Qt6 Gui, RenderGeometry | 3D network/model/flow/link/underground geometry, terrain topology, scene invalidation policy |
 | `AOWIS::RenderDevice` | bgfx and RenderGeometry | Device generation, client retirement, view/frame coordination and swapchains |
@@ -58,6 +68,10 @@ bootstrap step. No dependency is fetched during CMake configuration.
 `RenderCore` requires the device, 2D scene and globe targets. Render may build
 its own pinned bgfx target, or a parent can supply **one existing `bgfx`
 CMake target**. It must never create a second bgfx runtime in the process.
+GeographicLib and MODEL follow the same rule: a host that added
+`GeographicLib_STATIC` / `AOWIS::Model` before Render keeps ownership, and
+Render's submodules are used only when those targets do not exist
+(`cmake/aowis_render_dependencies.cmake`).
 Normal GUI builds embed Render with `AOWIS_RENDER_BUILD_MAP_CORE=ON`.
 
 All committed shader families use the existing resource convention
@@ -65,6 +79,12 @@ All committed shader families use the existing resource convention
 registered resources without source-level dependency on GUI resource files.
 
 ## What Render currently owns
+
+**Geodesy and terrain data**
+
+- `GeoWgs84Ellipsoid`, `GeoWebMercator`, `GeoMetricProjection` (`src/geo/`).
+- `MapTerrainTile` decoding and `MapTerrainDatasetCatalog` parsing
+  (`src/map/data/`); requests, caching and transport stay with the host.
 
 **Device and 2D**
 

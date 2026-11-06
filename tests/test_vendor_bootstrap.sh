@@ -10,7 +10,7 @@ mkdir -p "$tmp/upstream" "$tmp/gui" "$tmp/render"
 
 git -C "$tmp/gui" init -q
 git -C "$tmp/render" init -q
-for dep in bx bimg bgfx; do
+for dep in bx bimg bgfx GeographicLib AOWIS-SERVER-MODEL; do
     mkdir -p "$tmp/work/$dep"
     git -C "$tmp/work/$dep" init -q
     printf 'pinned-%s\n' "$dep" > "$tmp/work/$dep/version"

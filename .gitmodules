@@ -7,3 +7,9 @@
 [submodule "external/bgfx"]
 	path = external/bgfx
 	url = https://github.com/bkaradzic/bgfx.git
+[submodule "external/GeographicLib"]
+	path = external/GeographicLib
+	url = https://github.com/geographiclib/geographiclib.git
+[submodule "external/AOWIS-SERVER-MODEL"]
+	path = external/AOWIS-SERVER-MODEL
+	url = https://github.com/aowis-org/AOWIS-SERVER-MODEL.git

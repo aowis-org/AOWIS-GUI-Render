@@ -38,7 +38,8 @@ and—in parts of the 3D network scene—the hydraulic model.
 
 | Capability | Current implementation | Intended stable boundary |
 | --- | --- | --- |
-| 65×65 DEM tile format, validation, decoding | GUI `src/map/data/map_terrain_tile.*` | Render terrain-data module; preserve dataset and datum metadata |
+| 65×65 DEM tile format, validation, decoding; dataset catalog document | Render `AOWIS::RenderTerrainData` (`src/map/data/map_terrain_tile.*`, `map_terrain_dataset.*`) | Already shared; dataset and datum metadata preserved |
+| WGS84/ECEF, orbit camera basis, Web Mercator, UTM/local metric | Render `AOWIS::RenderGeo` (`src/geo/`) | Already shared; public API uses MODEL's `CoordinateWGS84` |
 | Terrain dataset catalog and request/cancel/cache bookkeeping | GUI `map_terrain_repository.*` | Neutral terrain cache/requests in engine; REST/cancel/config adapter outside |
 | Terrain mesh worker, DEM neighbor normals and ancestor stand-ins | GUI `map_terrain_mesh_scheduler.*`, `map_globe_surface_preparation.*` | Render worker and result streams; host supplies immutable tiles and render origin |
 | Globe quadtree culling, foreshortening and hysteresis | GUI `map_globe_surface_scene.*`, `map_globe_terrain_levels.h` | Render selection policy with neutral camera, viewport, dataset capability inputs |

@@ -323,6 +323,69 @@ if(AOWIS_RENDER_BUILD_GLOBE_MODELS)
     endif()
 endif()
 
+# Geodesy shared by every map host: WGS84 ellipsoid / ECEF and the orbit
+# camera basis, Web Mercator tile math, UTM and project-local metric
+# coordinates. Its public API uses MODEL's geodetic value types
+# (aowis/model/gis.h); GeographicLib stays an implementation detail. Host
+# targets are reused when present, see cmake/aowis_render_dependencies.cmake.
+option(AOWIS_RENDER_BUILD_GEO
+    "Build the geodesy library (Qt6 Gui, GeographicLib, AOWIS-SERVER-MODEL)"
+    ${AOWIS_RENDER_BUILD_MAP_CORE})
+# The terrain service's normalized DEM tile and dataset-catalog formats,
+# decoded identically by every host. Transport stays with the host.
+option(AOWIS_RENDER_BUILD_TERRAIN_DATA
+    "Build the terrain tile/dataset decoders (Qt6 Core)"
+    ${AOWIS_RENDER_BUILD_MAP_CORE})
+
+if(AOWIS_RENDER_BUILD_GEO)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/aowis_render_dependencies.cmake")
+    add_library(aowis-render-geo STATIC
+        src/geo/geo_metric_projection.cpp
+        src/geo/geo_metric_projection.h
+        src/geo/geo_web_mercator.cpp
+        src/geo/geo_web_mercator.h
+        src/geo/geo_wgs84_ellipsoid.cpp
+        src/geo/geo_wgs84_ellipsoid.h)
+    add_library(AOWIS::RenderGeo ALIAS aowis-render-geo)
+    # GeoMetricProjection is a QObject (originChanged signal).
+    set_target_properties(aowis-render-geo PROPERTIES AUTOMOC ON)
+    target_compile_features(aowis-render-geo PUBLIC cxx_std_20)
+    target_include_directories(aowis-render-geo PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(aowis-render-geo
+        PUBLIC Qt6::Core Qt6::Gui AOWIS::Model
+        PRIVATE GeographicLib_STATIC)
+
+    if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
+        add_executable(aowis-render-geo-tests tests/render_geo_test.cpp)
+        target_link_libraries(aowis-render-geo-tests PRIVATE AOWIS::RenderGeo)
+        add_test(NAME aowis-render-geo COMMAND aowis-render-geo-tests)
+        set_tests_properties(aowis-render-geo PROPERTIES LABELS "aowis;geometry;integration")
+    endif()
+endif()
+
+if(AOWIS_RENDER_BUILD_TERRAIN_DATA)
+    find_package(Qt6 REQUIRED COMPONENTS Core)
+    add_library(aowis-render-terrain-data STATIC
+        src/map/data/map_terrain_dataset.cpp
+        src/map/data/map_terrain_dataset.h
+        src/map/data/map_terrain_tile.cpp
+        src/map/data/map_terrain_tile.h)
+    add_library(AOWIS::RenderTerrainData ALIAS aowis-render-terrain-data)
+    target_compile_features(aowis-render-terrain-data PUBLIC cxx_std_20)
+    target_include_directories(aowis-render-terrain-data PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(aowis-render-terrain-data PUBLIC Qt6::Core)
+
+    if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
+        add_executable(aowis-render-terrain-data-tests tests/render_terrain_data_test.cpp)
+        target_link_libraries(aowis-render-terrain-data-tests PRIVATE AOWIS::RenderTerrainData)
+        add_test(NAME aowis-render-terrain-data COMMAND aowis-render-terrain-data-tests)
+        set_tests_properties(aowis-render-terrain-data PROPERTIES LABELS "aowis;integration")
+    endif()
+endif()
+
 # Exactly one bgfx target per process. GUI creates it here using its existing
 # pinned vendor sources; Mobile supplies its already-pinned bgfx.cmake target.
 # Nothing is fetched during configure.
@@ -436,4 +499,22 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND AOWIS_RENDER_BUILD_MAP_CORE)
         AOWIS_RENDER_TEST_SHADER_PATH=":/aowis/map/bgfx/${AOWIS_BGFX_TEST_SHADER_FAMILY}/vs_network_2d.bin")
     add_test(NAME aowis-render-core-link COMMAND aowis-render-core-link-tests)
     set_tests_properties(aowis-render-core-link PROPERTIES LABELS "aowis;integration")
+endif()
+
+# Every Render test carries the "aowis" label; compile_linux_tests.sh runs
+# only that label. A standalone build may also contain foreign tests
+# (GeographicLib registers tools/test programs it never builds here).
+if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
+    get_property(_aowis_render_tests DIRECTORY PROPERTY TESTS)
+    foreach(_aowis_render_test IN LISTS _aowis_render_tests)
+        get_test_property(${_aowis_render_test} LABELS _aowis_render_labels)
+        if(NOT _aowis_render_labels)
+            set(_aowis_render_labels "")
+        endif()
+        if(NOT "aowis" IN_LIST _aowis_render_labels)
+            list(APPEND _aowis_render_labels aowis)
+            set_tests_properties(${_aowis_render_test} PROPERTIES
+                LABELS "${_aowis_render_labels}")
+        endif()
+    endforeach()
 endif()

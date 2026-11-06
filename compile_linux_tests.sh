@@ -29,4 +29,6 @@ if ! cmake --build "${build_dir}" --parallel "${AOWIS_BUILD_JOBS}"; then
 fi
 # CTest may otherwise execute stale binaries from an earlier successful build.
 echo 'PASS: Render targets and test executables built; starting CTest.'
-ctest --test-dir "${build_dir}" --output-on-failure
+# Only Render's own tests (label "aowis"): a standalone build also registers
+# GeographicLib's tool tests, whose executables are never built here.
+ctest --test-dir "${build_dir}" --output-on-failure -L '^aowis$'

@@ -30,4 +30,21 @@ assert "AOWIS::RenderGeometry" in cmake
 for path in (root / "src/map/bgfx").glob("*.cpp"):
     text = path.read_text()
     assert not re.search(r"\bauto\s+\w", text), path
+# Geodesy and terrain data: Render-owned, using only Qt, GeographicLib and
+# MODEL's geodetic value types; never the GUI's headers or services.
+assert "add_library(aowis-render-geo STATIC" in cmake
+assert "add_library(aowis-render-terrain-data STATIC" in cmake
+assert "AOWIS::RenderGeo" in cmake and "AOWIS::RenderTerrainData" in cmake
+gui_headers = re.compile(r'#include\s+"(common|network|services|config|widgets|map/core|map/bgfx|entity_inspector)/')
+for relative in ["src/geo/geo_metric_projection", "src/geo/geo_web_mercator",
+                 "src/geo/geo_wgs84_ellipsoid", "src/map/data/map_terrain_tile",
+                 "src/map/data/map_terrain_dataset"]:
+    for suffix in (".h", ".cpp"):
+        text = (root / (relative + suffix)).read_text()
+        assert not gui_headers.search(text), relative + suffix
+        assert not re.search(r"\bauto\s+\w", text), relative + suffix
+for relative in ["src/map/data/map_terrain_tile", "src/map/data/map_terrain_dataset"]:
+    for suffix in (".h", ".cpp"):
+        text = (root / (relative + suffix)).read_text()
+        assert "aowis/model/" not in text and "GeographicLib" not in text, relative + suffix
 print("Renderer extraction and shader-family contract: OK")

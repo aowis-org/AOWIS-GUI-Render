@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-time registration of Render's own pinned bx/bimg/bgfx gitlinks.
-# Copies the exact vendor revisions recorded in an existing GUI checkout;
-# subsequent Render builds/clones do not depend on that checkout.
+# One-time registration of Render's own pinned vendor gitlinks (bx, bimg,
+# bgfx, GeographicLib, AOWIS-SERVER-MODEL). Copies the exact revisions
+# recorded in an existing GUI checkout; subsequent Render builds/clones do
+# not depend on that checkout. Already registered gitlinks are left as they
+# are, so the script also adds dependencies introduced later.
 if (( $# != 1 )); then
     printf 'Usage: %s /path/to/AOWIS-SERVER-GUI\n' "${0##*/}" >&2
     exit 2
@@ -20,9 +22,11 @@ if [[ "$(git -C "$gui" rev-parse --show-toplevel 2>/dev/null)" != "$gui" ]]; the
     exit 1
 fi
 
+deps=(bx bimg bgfx GeographicLib AOWIS-SERVER-MODEL)
+
 # Check all vendor gitlinks before modifying anything.
 declare -A revisions=()
-for dep in bx bimg bgfx; do
+for dep in "${deps[@]}"; do
     record="$(git -C "$gui" ls-files --stage -- "external/$dep")"
     if [[ ! "$record" =~ ^160000[[:space:]]+([0-9a-f]{40})[[:space:]]+0[[:space:]] ]]; then
         printf 'Error: GUI has no pinned gitlink for external/%s\n' "$dep" >&2
@@ -31,11 +35,25 @@ for dep in bx bimg bgfx; do
     revisions["$dep"]="${BASH_REMATCH[1]}"
 done
 
-url_base="${AOWIS_RENDER_VENDOR_URL_BASE:-https://github.com/bkaradzic}"
+# The upstream URL is the one the GUI uses for the same path. An explicit
+# AOWIS_RENDER_VENDOR_URL_BASE (mirror or test) replaces it with <base>/<dep>.git.
+default_url() {
+    case "$1" in
+        bx|bimg|bgfx) printf 'https://github.com/bkaradzic/%s.git\n' "$1" ;;
+        GeographicLib) printf 'https://github.com/geographiclib/geographiclib.git\n' ;;
+        AOWIS-SERVER-MODEL) printf 'https://github.com/aowis-org/AOWIS-SERVER-MODEL.git\n' ;;
+    esac
+}
+url_base="${AOWIS_RENDER_VENDOR_URL_BASE:-}"
 url_base="${url_base%/}"
-for dep in bx bimg bgfx; do
+for dep in "${deps[@]}"; do
     path="external/$dep"
-    url="$url_base/$dep.git"
+    if [[ -n "$url_base" ]]; then
+        url="$url_base/$dep.git"
+    else
+        url="$(git config -f "$gui/.gitmodules" --get "submodule.$path.url" 2>/dev/null || true)"
+        [[ -n "$url" ]] || url="$(default_url "$dep")"
+    fi
     # Never silently replace an existing submodule. If it is registered,
     # the caller must explicitly reconcile its pin with the GUI checkout.
     if git -C "$root" ls-files --stage -- "$path" | grep -q '^160000 '; then
@@ -47,7 +65,7 @@ for dep in bx bimg bgfx; do
         exit 1
     fi
     # file:// is allowed only for the explicitly supplied local test/mirror URL.
-    if [[ "$url_base" == file://* ]]; then
+    if [[ "$url" == file://* ]]; then
         git -C "$root" -c protocol.file.allow=always submodule add --depth 1 "$url" "$path"
     else
         git -C "$root" submodule add --depth 1 "$url" "$path"
@@ -63,4 +81,4 @@ done
 
 printf '\nVendor gitlinks staged. Review and commit in Render:\n'
 printf '  git diff --cached --submodule=short\n'
-printf '  git commit -m "Pin Render bgfx, bx and bimg vendor submodules"\n'
+printf '  git commit -m "Pin Render vendor submodules"\n'

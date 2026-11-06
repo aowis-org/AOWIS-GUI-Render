@@ -11,7 +11,7 @@ and visual/device checks** pass. Source-only/mock validation is not a sign-off.
 | Workstream | Deliverable | Verification that closes it |
 | --- | --- | --- |
 | Imagery GPU residency/lifecycle | Centralize tile-to-atlas residency, generations, eviction, upload decisions and recovery while preserving 2D/3D atlas sharing | Provider switch, stale replies, ancestor fallback, GPU reset and bounded uploads |
-| DEM tile format and terrain datasets | Move normalized decoder/metadata and neutral dataset identity; keep MAP server/native raster processing outside | Format/endianness/no-data/datum tests and real server-tile fixtures |
+| DEM tile format and terrain datasets | Decoder and catalog are in `AOWIS::RenderTerrainData`; remaining: real server-tile fixtures in the tests | Real server-tile fixtures |
 | Globe selection and LOD | Move quadtree leaves, horizon/view-cone culling, foreshortening, hysteresis and terrain zoom policy | Equivalent tile sets under camera paths, poles, antimeridian and viewport changes |
 | Terrain mesh generation and preparation | Move immutable requests, 65×65 sampling, neighbor normals, ancestor DEM stand-ins, worker scheduling and sparse patch staging | Continuous hillshading, correct skirts and bounded rebuilds on partial DEM arrival |
 | Tile streaming/caches | Unify visible-tile priority, bounded in-flight requests, cancellation, decode and cached payloads behind a source interface | Bad-network, provider-switch, cache, out-of-order response, retry and memory-limit tests |
