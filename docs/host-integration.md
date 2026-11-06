@@ -51,7 +51,23 @@ Qt resources (`:/map-3d/`) through `map_bgfx_globe_model_images.cpp`.
 The shared `MapBgfxGlobeGpu`, `MapBgfxGlobeBufferPool` and
 `MapBgfxGlobeResourcePool` own globe-network draw submission, buffers,
 shader programs, uniforms and GPU material textures. The desktop GUI retains
-scene preparation, picking, vertex layouts and the Qt resource image paths;
+scene preparation, picking and the Qt resource image paths;
 `mapBgfxGlobeMipTexture()` builds premultiplied mip levels in Render. Call
 both pools' `release()` before bgfx shutdown or device reinitialization.
 Globe terrain scene preparation remains in the desktop host.
+
+## 3D Globe CPU scene geometry
+
+`AOWIS::RenderGlobe` owns `MapGlobeFlowGeometry`, the production WGS84
+flow-chevron placement and tank/reservoir tangent-frame mathematics. The
+host supplies neutral retained-ECEF paths, camera pixels-per-meter,
+WGS84 anchor/radii, and a `bool` distinguishing pipe from non-pipe marker
+placement. Render emits both flow orientations so simulation steps can
+continue selecting the direction entirely through GPU entity styles.
+The host still converts neutral strokes into its existing shader vertex
+format and owns hydraulic entity ids, picking, and scene synchronization.
+
+The standalone no-Qt mock-geometry regression compiles the **production**
+`map_globe_flow_geometry.cpp`; a separate Qt test exercises the same API
+when Qt6 Gui is available. Link `AOWIS::RenderGlobe` for every application
+or test target compiling GUI's `map_globe_network_scene.cpp`.

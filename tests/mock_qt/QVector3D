@@ -1,0 +1,65 @@
+#ifndef AOWIS_MOCK_QVECTOR3D_H
+#define AOWIS_MOCK_QVECTOR3D_H
+
+#include <cmath>
+
+// Exercise the real production flow geometry on machines with no Qt/GPU.
+// This intentionally uses float arithmetic just like QVector3D.
+class QVector3D
+{
+public:
+    QVector3D() = default;
+    QVector3D(float x, float y, float z) : m_x(x), m_y(y), m_z(z) {}
+    float x() const { return this->m_x; }
+    float y() const { return this->m_y; }
+    float z() const { return this->m_z; }
+    float lengthSquared() const
+    {
+        return this->m_x * this->m_x + this->m_y * this->m_y + this->m_z * this->m_z;
+    }
+    void normalize()
+    {
+        const float length = std::sqrt(lengthSquared());
+        if (length > 0.0f)
+        {
+            this->m_x /= length;
+            this->m_y /= length;
+            this->m_z /= length;
+        }
+    }
+    QVector3D &operator+=(const QVector3D &other)
+    {
+        this->m_x += other.m_x;
+        this->m_y += other.m_y;
+        this->m_z += other.m_z;
+        return *this;
+    }
+    friend QVector3D operator+(const QVector3D &a, const QVector3D &b)
+    {
+        return QVector3D(a.m_x + b.m_x, a.m_y + b.m_y, a.m_z + b.m_z);
+    }
+    friend QVector3D operator-(const QVector3D &a, const QVector3D &b)
+    {
+        return QVector3D(a.m_x - b.m_x, a.m_y - b.m_y, a.m_z - b.m_z);
+    }
+    friend QVector3D operator*(const QVector3D &v, float scalar)
+    {
+        return QVector3D(v.m_x * scalar, v.m_y * scalar, v.m_z * scalar);
+    }
+    static float dotProduct(const QVector3D &a, const QVector3D &b)
+    {
+        return a.m_x * b.m_x + a.m_y * b.m_y + a.m_z * b.m_z;
+    }
+    static QVector3D crossProduct(const QVector3D &a, const QVector3D &b)
+    {
+        return QVector3D(a.m_y * b.m_z - a.m_z * b.m_y,
+                         a.m_z * b.m_x - a.m_x * b.m_z,
+                         a.m_x * b.m_y - a.m_y * b.m_x);
+    }
+private:
+    float m_x = 0.0f;
+    float m_y = 0.0f;
+    float m_z = 0.0f;
+};
+
+#endif // AOWIS_MOCK_QVECTOR3D_H

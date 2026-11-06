@@ -90,6 +90,29 @@ if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
     add_test(NAME aowis-render-globe-vertex-layouts-mock
         COMMAND aowis-render-globe-vertex-layouts-mock-tests)
     set_tests_properties(aowis-render-globe-vertex-layouts-mock PROPERTIES LABELS "aowis;rendering")
+    # Production Globe flow/tangent geometry compiled against tiny Qt math
+    # shims: validates the real algorithm without a GPU or Qt dev packages.
+    # Compile the actual globe link tessellator against Qt math stubs too.
+    add_executable(aowis-render-globe-link-geometry-mock-tests
+        src/map/render/map_globe_link_geometry.cpp
+        tests/render_globe_link_geometry_mock_test.cpp)
+    target_link_libraries(aowis-render-globe-link-geometry-mock-tests PRIVATE
+        AOWIS::RenderGeometry)
+    target_include_directories(aowis-render-globe-link-geometry-mock-tests BEFORE PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mock_qt")
+    add_test(NAME aowis-render-globe-link-geometry-mock
+        COMMAND aowis-render-globe-link-geometry-mock-tests)
+    set_tests_properties(aowis-render-globe-link-geometry-mock PROPERTIES LABELS "aowis;geometry")
+    add_executable(aowis-render-globe-flow-geometry-mock-tests
+        src/map/render/map_globe_flow_geometry.cpp
+        tests/render_globe_flow_geometry_mock_test.cpp)
+    target_link_libraries(aowis-render-globe-flow-geometry-mock-tests PRIVATE
+        AOWIS::RenderGeometry)
+    target_include_directories(aowis-render-globe-flow-geometry-mock-tests BEFORE PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mock_qt")
+    add_test(NAME aowis-render-globe-flow-geometry-mock
+        COMMAND aowis-render-globe-flow-geometry-mock-tests)
+    set_tests_properties(aowis-render-globe-flow-geometry-mock PROPERTIES LABELS "aowis;geometry")
     add_executable(aowis-render-globe-resource-pool-mock-tests
         src/map/bgfx/map_bgfx_globe_resource_pool.cpp
         tests/render_globe_resource_pool_mock_test.cpp)
@@ -142,6 +165,10 @@ if(AOWIS_RENDER_BUILD_GLOBE_MODELS)
         src/map/render/map_globe_render_instances.h
         src/map/render/map_globe_vertical_transform.h
         src/map/render/map_globe_surface_vertex.h
+        src/map/render/map_globe_flow_geometry.h
+        src/map/render/map_globe_flow_geometry.cpp
+        src/map/render/map_globe_link_geometry.h
+        src/map/render/map_globe_link_geometry.cpp
         src/map/render/map_globe_tank_model.h
         src/map/render/map_globe_tank_model.cpp
         src/map/render/map_globe_reservoir_model.h
@@ -153,6 +180,20 @@ if(AOWIS_RENDER_BUILD_GLOBE_MODELS)
     target_link_libraries(aowis-render-globe PUBLIC Qt6::Gui)
 
     if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
+        # Real Qt headers/production library linkage, in addition to the
+        # Qt-free mock test registered at the top of this file.
+        add_executable(aowis-render-globe-link-geometry-tests
+            tests/render_globe_link_geometry_mock_test.cpp)
+        target_link_libraries(aowis-render-globe-link-geometry-tests PRIVATE AOWIS::RenderGlobe)
+        add_test(NAME aowis-render-globe-link-geometry
+            COMMAND aowis-render-globe-link-geometry-tests)
+        set_tests_properties(aowis-render-globe-link-geometry PROPERTIES LABELS "aowis;geometry")
+        add_executable(aowis-render-globe-flow-geometry-tests
+            tests/render_globe_flow_geometry_test.cpp)
+        target_link_libraries(aowis-render-globe-flow-geometry-tests PRIVATE AOWIS::RenderGlobe)
+        add_test(NAME aowis-render-globe-flow-geometry
+            COMMAND aowis-render-globe-flow-geometry-tests)
+        set_tests_properties(aowis-render-globe-flow-geometry PROPERTIES LABELS "aowis;geometry")
         add_executable(aowis-render-globe-models-tests
             tests/render_globe_models_test.cpp)
         target_link_libraries(aowis-render-globe-models-tests PRIVATE AOWIS::RenderGlobe)

@@ -16,10 +16,24 @@ that GUI's **pinned** bgfx/bimg/bx revisions once in the Render repository:
 All subsequent Render clones work without any GUI checkout:
 
 ```sh
+./git_submodule_init.sh
+./compile_linux.sh           # Release: build/link all production Render libraries
+./compile_linux_tests.sh     # Release: build/link all targets first; only then CTest
+# Both accept --debug; AOWIS_BUILD_JOBS=8 and AOWIS_LINUX_LINKER=lld|system.
+```
+
+The standalone Ninja build scripts use separate `build-linux` and
+`build-linux-tests` directories; they never run a GUI program. The test script
+**never runs CTest when configuration, compilation or linking fails**.
+`bash tests/test_linux_compile_scripts.sh` checks that failure gate without
+building native dependencies. The manual CMake equivalent is:
+
+```sh
 git submodule update --init --recursive   # or ./git_submodule_init.sh
-cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build-linux -j 8
-ctest --test-dir build-linux --output-on-failure
+cmake -S . -B build-linux-manual-tests -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_TESTING=ON -DAOWIS_RENDER_BUILD_GEOMETRY_TESTS=ON
+cmake --build build-linux-manual-tests -j 8 && \
+  ctest --test-dir build-linux-manual-tests --output-on-failure
 ```
 
 Requires CMake 3.21+, Ninja, C++20, Qt6 Core and Gui development packages,
@@ -73,14 +87,23 @@ Vulkan, D3D11 and Metal families. Qt resource paths remain
 
 The production 2D network scene, mesh staging and GPU submission are in Render; GUI retains its hydraulic snapshot adapter and user-interaction logic.
 
+Globe scene preparation is now being separated incrementally: RenderGlobe
+owns curved-link ECEF tessellation, six-vertex ribbon topology and tangent
+width directions, while the GUI supplies GeographicLib/geodetic sampling,
+terrain heights and shader vertex coloration. RenderGlobe also
+owns CPU flow-chevron placement (including both orientations, WGS84 surface
+normal, and model tangent basis), while GUI supplies hydraulic entity IDs,
+scene paths and shader-vertex adaptation. Mock-backend and real-Qt geometry
+regressions protect the 3D flow and model orientation math.
+
 The first 3D extraction moves production tank and reservoir mesh generation,
 vertex/instance layouts, vertical transform, and globe surface vertex math
 into **`AOWIS::RenderGlobe`** (Qt6 Gui; no bgfx, GUI model, or platform host
 requirements). GUI continues supplying the existing `:/map-3d/*_albedo.png`
 texture resources through a small host adapter. Render now owns globe GPU
 draw submission, dynamic buffers, shader/uniform resources, and GPU model
-textures. Camera/model synchronization, vertex layout definitions and terrain
-scene preparation remain in GUI.
+textures. Camera/model synchronization and terrain scene preparation remain in GUI;
+RenderCore owns the production globe vertex layouts.
 
 ### Globe-network programs, uniforms and textures
 

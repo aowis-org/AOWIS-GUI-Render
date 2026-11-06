@@ -1,0 +1,15 @@
+#ifndef AOWIS_MOCK_QVECTOR_H
+#define AOWIS_MOCK_QVECTOR_H
+
+#include <vector>
+
+template <typename T>
+class QVector : public std::vector<T>
+{
+public:
+    using std::vector<T>::vector;
+    bool isEmpty() const { return this->empty(); }
+    void append(const T &value) { this->push_back(value); }
+};
+
+#endif // AOWIS_MOCK_QVECTOR_H
