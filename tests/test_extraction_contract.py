@@ -47,4 +47,18 @@ for relative in ["src/map/data/map_terrain_tile", "src/map/data/map_terrain_data
     for suffix in (".h", ".cpp"):
         text = (root / (relative + suffix)).read_text()
         assert "aowis/model/" not in text and "GeographicLib" not in text, relative + suffix
+# MapModel and its helpers: Render-owned, host services injected.
+assert "add_library(aowis-render-view STATIC" in cmake and "AOWIS::RenderView" in cmake
+for relative in ["src/map/core/map_model.h", "src/map/core/map_model.cpp",
+                 "src/map/core/map_view_types.h", "src/map/core/map_imagery_provider_directory.h",
+                 "src/map/render/map_camera_view_state.h", "src/map/render/map_render_diagnostics.h",
+                 "src/map/render/map_globe_picking.h", "src/map/render/map_globe_picking.cpp",
+                 "src/map/render/map_render_cache_math.h", "src/map/render/map_render_cache_math.cpp"]:
+    text = (root / relative).read_text()
+    # Every quoted include resolves inside Render (or is MODEL's): no GUI header.
+    for included in re.findall(r'#include\s+"([^"]+)"', text):
+        assert included.startswith("aowis/model/") or (root / "src" / included).is_file(), \
+            relative + " includes " + included
+    assert "guiConfiguration" not in text and "mapProviderCatalog" not in text, relative
+    assert not re.search(r"\bauto\s+\w", text), relative
 print("Renderer extraction and shader-family contract: OK")

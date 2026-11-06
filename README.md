@@ -59,6 +59,7 @@ builds.
 | --- | --- | --- |
 | `AOWIS::RenderGeometry` | C++20 only | Projections, camera helpers, icon index, terrain-height cache, imagery UV fallback, draw-plan contracts |
 | `AOWIS::RenderGeo` | Qt6 Gui, MODEL (`aowis/model/gis.h`), GeographicLib (private) | WGS84 ellipsoid/ECEF, orbit camera basis, screen rays, Web Mercator tile math, UTM and project-local metric coordinates |
+| `AOWIS::RenderView` | Qt6 Gui, RenderGeo | `MapModel` (2D continuous zoom, globe orbit rig, screen <-> WGS84, imagery tile addressing through the host's `MapImageryProviderDirectory`), camera view state, globe picking, render cache math, render diagnostics |
 | `AOWIS::RenderTerrainData` | Qt6 Core | Normalized 65×65 DEM tile decoder (v1 format), tile keys/endpoints, terrain dataset catalog |
 | `AOWIS::RenderNetwork` | Qt6 Core, RenderGeometry | Production 2D network scene variants and CPU mesh staging |
 | `AOWIS::RenderGlobe` | Qt6 Gui, RenderGeometry | 3D network/model/flow/link/underground geometry, terrain topology, scene invalidation policy |
@@ -85,6 +86,14 @@ registered resources without source-level dependency on GUI resource files.
 - `GeoWgs84Ellipsoid`, `GeoWebMercator`, `GeoMetricProjection` (`src/geo/`).
 - `MapTerrainTile` decoding and `MapTerrainDatasetCatalog` parsing
   (`src/map/data/`); requests, caching and transport stay with the host.
+
+**View state**
+
+- `MapModel` with `MapViewMode` / `MapProvider` (`map/core/map_view_types.h`).
+  Host services are injected: the provider catalog as a
+  `MapImageryProviderDirectory` (change notifications via
+  `providerCatalogChanged()` / `providerFallbackChanged()`), the orbit
+  sensitivity as a getter (`setOrbitSensitivitySource()`).
 
 **Device and 2D**
 

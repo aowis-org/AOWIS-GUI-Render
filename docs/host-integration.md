@@ -9,7 +9,7 @@ surfaces are available through a single engine object yet.
 | --- | --- | --- |
 | Toolkit | Qt Widgets / native `QWindow`; WebAssembly canvas hosted by GUI | Qt Quick / Android EGL |
 | Shared device | `AOWIS::RenderDevice` | `AOWIS::RenderDevice` |
-| Geodesy, terrain data | `AOWIS::RenderGeo`, `AOWIS::RenderTerrainData` | Same targets |
+| Geodesy, terrain data, view state | `AOWIS::RenderGeo`, `AOWIS::RenderTerrainData`, `AOWIS::RenderView` | Same targets; implement `MapImageryProviderDirectory` for `MapModel` |
 | GeographicLib, MODEL | GUI's submodules (added before Render) | Mobile's submodules (add before Render) |
 | Shared geometry | `AOWIS::RenderGeometry`, plus production `RenderNetwork`/`RenderGlobe` used by GUI | Low-level geometry/device integration; production globe/terrain integration deferred |
 | GPU library | `AOWIS::RenderCore` | Production Map GPU core not yet integrated |

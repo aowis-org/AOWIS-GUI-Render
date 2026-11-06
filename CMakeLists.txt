@@ -365,6 +365,45 @@ if(AOWIS_RENDER_BUILD_GEO)
     endif()
 endif()
 
+# Camera/view state shared by every map host: MapModel (2D continuous zoom,
+# globe orbit rig, screen <-> WGS84, imagery tile addressing through the
+# host's MapImageryProviderDirectory), globe picking rays, render cache math
+# and the opt-in render diagnostics counters.
+option(AOWIS_RENDER_BUILD_VIEW
+    "Build the map view state library (Qt6 Gui, RenderGeo)"
+    ${AOWIS_RENDER_BUILD_GEO})
+if(AOWIS_RENDER_BUILD_VIEW AND NOT AOWIS_RENDER_BUILD_GEO)
+    message(FATAL_ERROR "AOWIS_RENDER_BUILD_VIEW requires AOWIS_RENDER_BUILD_GEO=ON")
+endif()
+if(AOWIS_RENDER_BUILD_VIEW)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui)
+    add_library(aowis-render-view STATIC
+        src/map/core/map_view_types.h
+        src/map/core/map_imagery_provider_directory.h
+        src/map/core/map_model.h
+        src/map/core/map_model.cpp
+        src/map/render/map_camera_view_state.h
+        src/map/render/map_globe_picking.h
+        src/map/render/map_globe_picking.cpp
+        src/map/render/map_render_cache_math.h
+        src/map/render/map_render_cache_math.cpp
+        src/map/render/map_render_diagnostics.h)
+    add_library(AOWIS::RenderView ALIAS aowis-render-view)
+    # MapModel is a QObject (camera and provider signals).
+    set_target_properties(aowis-render-view PROPERTIES AUTOMOC ON)
+    target_compile_features(aowis-render-view PUBLIC cxx_std_20)
+    target_include_directories(aowis-render-view PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(aowis-render-view PUBLIC Qt6::Core Qt6::Gui AOWIS::RenderGeo)
+
+    if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
+        add_executable(aowis-render-view-tests tests/render_view_test.cpp)
+        target_link_libraries(aowis-render-view-tests PRIVATE AOWIS::RenderView)
+        add_test(NAME aowis-render-view COMMAND aowis-render-view-tests)
+        set_tests_properties(aowis-render-view PROPERTIES LABELS "aowis;integration")
+    endif()
+endif()
+
 if(AOWIS_RENDER_BUILD_TERRAIN_DATA)
     find_package(Qt6 REQUIRED COMPONENTS Core)
     add_library(aowis-render-terrain-data STATIC
