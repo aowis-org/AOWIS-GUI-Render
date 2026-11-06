@@ -425,6 +425,55 @@ if(AOWIS_RENDER_BUILD_TERRAIN_DATA)
     endif()
 endif()
 
+# Map data repositories shared by every map host: imagery tile and DEM
+# tile request scheduling, caches, decode workers (on WASM the browser's
+# native image decoders), the terrain dataset catalog and cache deletion.
+# They talk to the map server through the InterfaceServerMap contract; the
+# host supplies the transport (MapServerTransport).
+option(AOWIS_RENDER_BUILD_MAP_DATA
+    "Build the map data repositories (Qt6 Gui, RenderView, RenderTerrainData)"
+    ${AOWIS_RENDER_BUILD_VIEW})
+if(AOWIS_RENDER_BUILD_MAP_DATA AND NOT (AOWIS_RENDER_BUILD_VIEW AND AOWIS_RENDER_BUILD_TERRAIN_DATA))
+    message(FATAL_ERROR "AOWIS_RENDER_BUILD_MAP_DATA requires AOWIS_RENDER_BUILD_VIEW "
+        "and AOWIS_RENDER_BUILD_TERRAIN_DATA")
+endif()
+if(AOWIS_RENDER_BUILD_MAP_DATA)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui)
+    add_library(aowis-render-map-data STATIC
+        src/services/interface_server_map.h
+        src/map/data/map_server_transport.h
+        src/map/data/map_terrain_tile_source.h
+        src/map/data/map_tile_repository.h
+        src/map/data/map_tile_repository.cpp
+        src/map/data/map_terrain_repository.h
+        src/map/data/map_terrain_repository.cpp)
+    if(EMSCRIPTEN)
+        # Browser-native tile decoding (createImageBitmap + OffscreenCanvas
+        # on a dedicated worker); its EMSCRIPTEN_KEEPALIVE entry points stay
+        # exported because the tile repository references the decoder.
+        target_sources(aowis-render-map-data PRIVATE
+            src/map/data/map_tile_browser_decoder.h
+            src/map/data/map_tile_browser_decoder.cpp)
+    endif()
+    add_library(AOWIS::RenderMapData ALIAS aowis-render-map-data)
+    # InterfaceServerMap and both repositories are QObjects.
+    set_target_properties(aowis-render-map-data PROPERTIES AUTOMOC ON)
+    target_compile_features(aowis-render-map-data PUBLIC cxx_std_20)
+    target_include_directories(aowis-render-map-data PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(aowis-render-map-data PUBLIC
+        Qt6::Core Qt6::Gui AOWIS::RenderView AOWIS::RenderTerrainData)
+
+    if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
+        add_executable(aowis-render-map-data-tests tests/render_map_data_test.cpp)
+        set_target_properties(aowis-render-map-data-tests PROPERTIES AUTOMOC ON)
+        target_link_libraries(aowis-render-map-data-tests PRIVATE AOWIS::RenderMapData)
+        add_test(NAME aowis-render-map-data COMMAND aowis-render-map-data-tests)
+        set_tests_properties(aowis-render-map-data PROPERTIES
+            LABELS "aowis;integration" ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
+endif()
+
 # CPU side of the globe terrain: quadtree leaf selection and LOD, the
 # retained tile window with sparse DEM patches, the terrain mesh worker
 # (normals, skirts, ancestor stand-ins), terrain-aware navigation, the globe

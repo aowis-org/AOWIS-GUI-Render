@@ -76,4 +76,14 @@ for relative in ["src/map/data/map_terrain_tile_source.h", "src/map/render/map_g
             relative + " includes " + included
     assert "guiConfiguration" not in text and "MapTerrainRepository" not in text, relative
     assert not re.search(r"\bauto\s+\w", text), relative
+# Map data repositories: Render-owned, transport injected.
+assert "add_library(aowis-render-map-data STATIC" in cmake and "AOWIS::RenderMapData" in cmake
+for relative in ['src/services/interface_server_map.h', 'src/map/data/map_tile_repository.h', 'src/map/data/map_tile_repository.cpp', 'src/map/data/map_terrain_repository.h', 'src/map/data/map_terrain_repository.cpp', 'src/map/data/map_tile_browser_decoder.h', 'src/map/data/map_tile_browser_decoder.cpp', 'src/map/data/map_server_transport.h']:
+    text = (root / relative).read_text()
+    for included in re.findall(r'#include\s+"([^"]+)"', text):
+        assert included.startswith("aowis/model/") or (root / "src" / included).is_file(), \
+            relative + " includes " + included
+    assert "MapServerMode" not in text and "AOWIS_STANDALONE" not in text, relative
+    assert "mapProviderCatalog" not in text and "guiConfiguration" not in text, relative
+    assert not re.search(r"\bauto\s+\w", text), relative
 print("Renderer extraction and shader-family contract: OK")

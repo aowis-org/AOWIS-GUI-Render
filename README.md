@@ -61,6 +61,7 @@ builds.
 | `AOWIS::RenderGeo` | Qt6 Gui, MODEL (`aowis/model/gis.h`), GeographicLib (private) | WGS84 ellipsoid/ECEF, orbit camera basis, screen rays, Web Mercator tile math, UTM and project-local metric coordinates |
 | `AOWIS::RenderView` | Qt6 Gui, RenderGeo | `MapModel` (2D continuous zoom, globe orbit rig, screen <-> WGS84, imagery tile addressing through the host's `MapImageryProviderDirectory`), camera view state, globe picking, render cache math, render diagnostics |
 | `AOWIS::RenderGlobeTerrain` | Qt6 Gui, RenderView, RenderTerrainData, RenderGlobe | Globe terrain CPU pipeline: quadtree selection/LOD, surface preparation, mesh scheduler, terrain navigation, globe camera, heatmap scene; tiles from the host's `MapTerrainTileSource` |
+| `AOWIS::RenderMapData` | Qt6 Gui, RenderView, RenderTerrainData | Imagery and DEM tile repositories (scheduling, caches, decode workers, WASM browser decoder, dataset catalog, cache deletion) over the `InterfaceServerMap` contract; the host supplies a `MapServerTransport` |
 | `AOWIS::RenderTerrainData` | Qt6 Core | Normalized 65×65 DEM tile decoder (v1 format), tile keys/endpoints, terrain dataset catalog |
 | `AOWIS::RenderNetwork` | Qt6 Core, RenderGeometry | Production 2D network scene variants and CPU mesh staging |
 | `AOWIS::RenderGlobe` | Qt6 Gui, RenderGeometry | 3D network/model/flow/link/underground geometry, terrain topology, scene invalidation policy |
@@ -95,6 +96,14 @@ registered resources without source-level dependency on GUI resource files.
   `MapImageryProviderDirectory` (change notifications via
   `providerCatalogChanged()` / `providerFallbackChanged()`), the orbit
   sensitivity as a getter (`setOrbitSensitivitySource()`).
+
+**Map data**
+
+- `MapTileRepository`, `MapTerrainRepository` (`src/map/data/`) and the map
+  server transport contract `InterfaceServerMap` (`src/services/`). The host
+  creates the concrete transport (REST, in-process server) through
+  `MapServerTransport` and forwards provider-catalog changes to
+  `MapTileRepository::invalidateProviderCatalog()`.
 
 **Globe terrain pipeline**
 
