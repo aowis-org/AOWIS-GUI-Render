@@ -113,6 +113,17 @@ if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
     add_test(NAME aowis-render-globe-flow-geometry-mock
         COMMAND aowis-render-globe-flow-geometry-mock-tests)
     set_tests_properties(aowis-render-globe-flow-geometry-mock PROPERTIES LABELS "aowis;geometry")
+    # The same production retained-scene invalidation policy is exercised
+    # without Qt, a GPU, or hydraulic model types.
+    add_executable(aowis-render-globe-scene-sync-tests
+        src/map/render/map_globe_scene_sync.cpp
+        tests/render_globe_scene_sync_test.cpp)
+    target_link_libraries(aowis-render-globe-scene-sync-tests PRIVATE
+        AOWIS::RenderGeometry)
+    add_test(NAME aowis-render-globe-scene-sync
+        COMMAND aowis-render-globe-scene-sync-tests)
+    set_tests_properties(aowis-render-globe-scene-sync PROPERTIES
+        LABELS "aowis;geometry")
     # Pure C++ classification policy: real production source, no Qt or GPU.
     add_executable(aowis-render-globe-underground-geometry-tests
         src/map/render/map_globe_underground_geometry.cpp
@@ -181,6 +192,8 @@ if(AOWIS_RENDER_BUILD_GLOBE_MODELS)
         src/map/render/map_globe_link_geometry.cpp
         src/map/render/map_globe_underground_geometry.h
         src/map/render/map_globe_underground_geometry.cpp
+        src/map/render/map_globe_scene_sync.h
+        src/map/render/map_globe_scene_sync.cpp
         src/map/render/map_globe_tank_model.h
         src/map/render/map_globe_tank_model.cpp
         src/map/render/map_globe_reservoir_model.h
@@ -209,6 +222,16 @@ if(AOWIS_RENDER_BUILD_GLOBE_MODELS)
         add_test(NAME aowis-render-globe-underground-library-link
             COMMAND aowis-render-globe-underground-library-link-tests)
         set_tests_properties(aowis-render-globe-underground-library-link PROPERTIES
+            LABELS "aowis;geometry;integration")
+        # Resolve the production RenderGlobe symbol, not only the isolated
+        # Qt-free compilation above.
+        add_executable(aowis-render-globe-scene-sync-library-link-tests
+            tests/render_globe_scene_sync_test.cpp)
+        target_link_libraries(aowis-render-globe-scene-sync-library-link-tests PRIVATE
+            AOWIS::RenderGlobe)
+        add_test(NAME aowis-render-globe-scene-sync-library-link
+            COMMAND aowis-render-globe-scene-sync-library-link-tests)
+        set_tests_properties(aowis-render-globe-scene-sync-library-link PROPERTIES
             LABELS "aowis;geometry;integration")
         add_executable(aowis-render-globe-flow-geometry-tests
             tests/render_globe_flow_geometry_test.cpp)

@@ -87,6 +87,15 @@ Vulkan, D3D11 and Metal families. Qt resource paths remain
 
 The production 2D network scene, mesh staging and GPU submission are in Render; GUI retains its hydraulic snapshot adapter and user-interaction logic.
 
+RenderGlobe owns retained Globe scene stream invalidation decisions through
+`MapGlobeSceneSync`. The GUI maps Qt/hydraulic symbology and selection state to
+neutral change flags and executes the resulting CPU rebuild plan. Visual-only
+snapshot revisions, camera movement and flow time steps do not rebuild ECEF
+network geometry; full geometry rebuilds subsume dependent stream updates.
+The Qt-free tests exercise the same compiled production planner and its
+production-library linkage. Retained snapshot/index storage, ECEF anchoring,
+terrain lookup and UI interactions remain in GUI.
+
 Globe scene preparation is now being separated incrementally: RenderGlobe
 owns curved-link ECEF tessellation, six-vertex ribbon topology and tangent
 width directions, while the GUI supplies GeographicLib/geodetic sampling,
