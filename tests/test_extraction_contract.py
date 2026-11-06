@@ -13,6 +13,7 @@ assert "AOWIS::RenderDevice" in cmake
 assert "AOWIS::RenderCore" in cmake
 for source in [
     "bgfx_device_manager.cpp", "bgfx_frame_coordinator.cpp",
+    "map_bgfx_globe_buffer_pool.cpp",
     "bgfx_native_target_registry.cpp", "map_bgfx_2d_imagery_gpu.cpp",
     "map_bgfx_hud_gpu.cpp", "map_bgfx_hud_text_cache.cpp",
 ]:

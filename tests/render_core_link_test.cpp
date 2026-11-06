@@ -1,5 +1,6 @@
 #include "map/bgfx/bgfx_device_manager.h"
 #include "map/bgfx/map_bgfx_backend.h"
+#include "map/bgfx/map_bgfx_globe_buffer_pool.h"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -21,6 +22,20 @@ int main(int argc, char **argv)
     {
         std::cerr << "Missing embedded shader: " << shaderPath.toStdString() << '\n';
         return EXIT_FAILURE;
+    }
+
+    // The resource-pool entry point must link into the real RenderCore
+    // without an initialized GPU. Only passive handle inspection is used.
+    MapBgfxGlobeBufferPool gpu_buffers;
+    MapBgfxGlobeGpu::Input input;
+    gpu_buffers.populateInput(&input);
+    for (const MapBgfxGlobeGpu::StreamBuffer &stream : input.streams)
+    {
+        if (stream.count != 0 || bgfx::isValid(stream.handle))
+        {
+            std::cerr << "New globe buffer pool contains an allocated GPU stream\n";
+            return EXIT_FAILURE;
+        }
     }
 
     BgfxDeviceManager device;

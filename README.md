@@ -132,3 +132,14 @@ hydraulic types, map widgets, camera controllers, or network snapshots.
 Solid, X-Ray and Hide pass ordering. The GUI currently supplies buffer,
 program, texture and uniform handles and owns their lifetime; migrating
 resource allocation/scene synchronization is a separate later step.
+
+### Globe-network GPU buffer ownership
+
+`MapBgfxGlobeBufferPool` owns the thirteen dynamic vertex streams and the
+optional depth-ordered icon index buffer. The desktop host supplies its
+existing scene vertex layouts, vertex bytes, and icon ordering; Render
+allocates, reuses, uploads, and explicitly destroys the bgfx buffers. Empty
+streams preserve their allocation but report a zero draw count. `release()`
+must run before device teardown, and the same instance can upload again
+after device reinitialization. Programs, uniforms, and model-material textures
+remain a separate extraction step.

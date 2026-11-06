@@ -72,6 +72,15 @@ if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
     # Compile and execute the production GPU submission implementation against
     # a tiny recording bgfx stub: this exercises real draw calls even on
     # machines without a graphics device, Qt or vendor submodules.
+    add_executable(aowis-render-globe-buffer-pool-mock-tests
+        src/map/bgfx/map_bgfx_globe_buffer_pool.cpp
+        tests/render_globe_buffer_pool_mock_test.cpp)
+    target_link_libraries(aowis-render-globe-buffer-pool-mock-tests PRIVATE AOWIS::RenderGeometry)
+    target_include_directories(aowis-render-globe-buffer-pool-mock-tests BEFORE PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mock_bgfx")
+    add_test(NAME aowis-render-globe-buffer-pool-mock
+        COMMAND aowis-render-globe-buffer-pool-mock-tests)
+    set_tests_properties(aowis-render-globe-buffer-pool-mock PROPERTIES LABELS "aowis;rendering")
     add_executable(aowis-render-globe-gpu-mock-tests
         src/map/bgfx/map_bgfx_globe_gpu.cpp
         tests/render_globe_gpu_mock_test.cpp)
@@ -175,6 +184,8 @@ if(AOWIS_RENDER_BUILD_MAP_CORE)
         src/map/bgfx/map_bgfx_globe_draw_plan.h
         src/map/bgfx/map_bgfx_globe_gpu.h
         src/map/bgfx/map_bgfx_globe_gpu.cpp
+        src/map/bgfx/map_bgfx_globe_buffer_pool.h
+        src/map/bgfx/map_bgfx_globe_buffer_pool.cpp
         src/map/bgfx/map_bgfx_pan_reuse.h
         src/map/bgfx/map_bgfx_hud_canvas.h
         src/map/bgfx/map_bgfx_hud_gpu.cpp
