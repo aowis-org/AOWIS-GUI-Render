@@ -41,9 +41,9 @@ and—in parts of the 3D network scene—the hydraulic model.
 | 65×65 DEM tile format, validation, decoding; dataset catalog document | Render `AOWIS::RenderTerrainData` (`src/map/data/map_terrain_tile.*`, `map_terrain_dataset.*`) | Already shared; dataset and datum metadata preserved |
 | WGS84/ECEF, orbit camera basis, Web Mercator, UTM/local metric | Render `AOWIS::RenderGeo` (`src/geo/`) | Already shared; public API uses MODEL's `CoordinateWGS84` |
 | Terrain dataset catalog and request/cancel/cache bookkeeping | GUI `map_terrain_repository.*` | Neutral terrain cache/requests in engine; REST/cancel/config adapter outside |
-| Terrain mesh worker, DEM neighbor normals and ancestor stand-ins | GUI `map_terrain_mesh_scheduler.*`, `map_globe_surface_preparation.*` | Render worker and result streams; host supplies immutable tiles and render origin |
-| Globe quadtree culling, foreshortening and hysteresis | GUI `map_globe_surface_scene.*`, `map_globe_terrain_levels.h` | Render selection policy with neutral camera, viewport, dataset capability inputs |
-| Visible tile pool, DEM range patches, terrain-height intersection | GUI `map_globe_surface_preparation.*` | Render retained scene preparation and query API |
+| Terrain mesh worker, DEM neighbor normals and ancestor stand-ins | Render `AOWIS::RenderGlobeTerrain` (`map_terrain_mesh_scheduler.*`, `map_globe_surface_preparation.*`) | Already shared; tiles through `MapTerrainTileSource` |
+| Globe quadtree culling, foreshortening and hysteresis | Render `map_globe_surface_scene.*`, `map_globe_terrain_levels.h` | Already shared |
+| Visible tile pool, DEM range patches, terrain-height intersection | Render `map_globe_surface_preparation.*` | Already shared; frame orchestration still in GUI `MapBgfxGlobeSurface` |
 | Terrain indices/skirt topology and GPU index pool | Render `MapGlobeTileTopology`, `MapBgfxGlobeTileIndexPool` | Already shared |
 | Terrain vertex/index uploads and GPU terrain/sky/heatmap draw | Render GPU classes | Already shared; host still selects per-frame work |
 | Imagery request batching, prioritization, decoded QImage cache | GUI `map_tile_repository.*`, `map_tile_streaming_policy.h` | Render tile scheduler/cache; host supplies tile-source transport |

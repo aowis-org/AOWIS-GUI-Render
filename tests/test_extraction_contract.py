@@ -61,4 +61,19 @@ for relative in ["src/map/core/map_model.h", "src/map/core/map_model.cpp",
             relative + " includes " + included
     assert "guiConfiguration" not in text and "mapProviderCatalog" not in text, relative
     assert not re.search(r"\bauto\s+\w", text), relative
+# Globe terrain pipeline: Render-owned, terrain tiles through MapTerrainTileSource.
+assert "add_library(aowis-render-globe-terrain STATIC" in cmake and "AOWIS::RenderGlobeTerrain" in cmake
+for relative in ["src/map/data/map_terrain_tile_source.h", "src/map/render/map_globe_surface_hit.h",
+                 "src/map/render/map_globe_terrain_levels.h", "src/map/render/map_globe_retained_origin.h"] + [
+        "src/map/render/" + name + suffix
+        for name in ["map_globe_camera", "map_globe_heatmap_scene", "map_globe_surface_scene",
+                     "map_globe_surface_preparation", "map_terrain_mesh_scheduler",
+                     "map_globe_terrain_navigation"]
+        for suffix in (".h", ".cpp")]:
+    text = (root / relative).read_text()
+    for included in re.findall(r'#include\s+"([^"]+)"', text):
+        assert included.startswith("aowis/model/") or (root / "src" / included).is_file(), \
+            relative + " includes " + included
+    assert "guiConfiguration" not in text and "MapTerrainRepository" not in text, relative
+    assert not re.search(r"\bauto\s+\w", text), relative
 print("Renderer extraction and shader-family contract: OK")

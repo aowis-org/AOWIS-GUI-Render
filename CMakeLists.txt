@@ -425,6 +425,54 @@ if(AOWIS_RENDER_BUILD_TERRAIN_DATA)
     endif()
 endif()
 
+# CPU side of the globe terrain: quadtree leaf selection and LOD, the
+# retained tile window with sparse DEM patches, the terrain mesh worker
+# (normals, skirts, ancestor stand-ins), terrain-aware navigation, the globe
+# camera and the heatmap bake scene. Terrain tiles come from the host's
+# MapTerrainTileSource; the detail-reduction setting is an injected getter.
+option(AOWIS_RENDER_BUILD_GLOBE_TERRAIN
+    "Build the globe terrain pipeline (Qt6 Gui, RenderView, RenderTerrainData, RenderGlobe)"
+    ${AOWIS_RENDER_BUILD_VIEW})
+if(AOWIS_RENDER_BUILD_GLOBE_TERRAIN AND NOT (AOWIS_RENDER_BUILD_VIEW
+        AND AOWIS_RENDER_BUILD_TERRAIN_DATA AND AOWIS_RENDER_BUILD_GLOBE_MODELS))
+    message(FATAL_ERROR "AOWIS_RENDER_BUILD_GLOBE_TERRAIN requires AOWIS_RENDER_BUILD_VIEW, "
+        "AOWIS_RENDER_BUILD_TERRAIN_DATA and AOWIS_RENDER_BUILD_GLOBE_MODELS")
+endif()
+if(AOWIS_RENDER_BUILD_GLOBE_TERRAIN)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui)
+    add_library(aowis-render-globe-terrain STATIC
+        src/map/data/map_terrain_tile_source.h
+        src/map/render/map_globe_surface_hit.h
+        src/map/render/map_globe_terrain_levels.h
+        src/map/render/map_globe_retained_origin.h
+        src/map/render/map_globe_camera.h
+        src/map/render/map_globe_camera.cpp
+        src/map/render/map_globe_heatmap_scene.h
+        src/map/render/map_globe_heatmap_scene.cpp
+        src/map/render/map_globe_surface_scene.h
+        src/map/render/map_globe_surface_scene.cpp
+        src/map/render/map_globe_surface_preparation.h
+        src/map/render/map_globe_surface_preparation.cpp
+        src/map/render/map_terrain_mesh_scheduler.h
+        src/map/render/map_terrain_mesh_scheduler.cpp
+        src/map/render/map_globe_terrain_navigation.h
+        src/map/render/map_globe_terrain_navigation.cpp)
+    add_library(AOWIS::RenderGlobeTerrain ALIAS aowis-render-globe-terrain)
+    target_compile_features(aowis-render-globe-terrain PUBLIC cxx_std_20)
+    target_include_directories(aowis-render-globe-terrain PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(aowis-render-globe-terrain PUBLIC
+        Qt6::Core Qt6::Gui AOWIS::RenderView AOWIS::RenderTerrainData AOWIS::RenderGlobe)
+
+    if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
+        add_executable(aowis-render-globe-terrain-tests tests/render_globe_terrain_test.cpp)
+        target_link_libraries(aowis-render-globe-terrain-tests PRIVATE AOWIS::RenderGlobeTerrain)
+        add_test(NAME aowis-render-globe-terrain COMMAND aowis-render-globe-terrain-tests)
+        set_tests_properties(aowis-render-globe-terrain PROPERTIES
+            LABELS "aowis;integration" ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
+endif()
+
 # Exactly one bgfx target per process. GUI creates it here using its existing
 # pinned vendor sources; Mobile supplies its already-pinned bgfx.cmake target.
 # Nothing is fetched during configure.
