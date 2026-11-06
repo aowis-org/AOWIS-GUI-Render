@@ -1,0 +1,25 @@
+#ifndef AOWIS_MOCK_QT_GLOBAL_H
+#define AOWIS_MOCK_QT_GLOBAL_H
+
+#include <algorithm>
+#include <cstdint>
+
+// Match Qt's signal keyword macro during mock compilation so identifiers
+// that collide with Qt (such as an "emit" callback) fail in this test too.
+#define emit
+
+using quint32 = std::uint32_t;
+
+template <typename T>
+const T &qMax(const T &left, const T &right)
+{
+    return std::max(left, right);
+}
+
+template <typename T>
+const T &qBound(const T &minimum, const T &value, const T &maximum)
+{
+    return std::clamp(value, minimum, maximum);
+}
+
+#endif // AOWIS_MOCK_QT_GLOBAL_H
