@@ -153,8 +153,20 @@ if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
         COMMAND aowis-render-globe-terrain-buffer-pool-mock-tests)
     set_tests_properties(aowis-render-globe-terrain-buffer-pool-mock PROPERTIES
         LABELS "aowis;rendering")
-    # The production terrain GPU submission/resource owner, compiled against
-    # recording bgfx without Qt or a GPU device.
+    # The production sky/heatmap GPU submission/resource owner, compiled
+    # against recording bgfx without Qt or a GPU device.
+    add_executable(aowis-render-globe-overlay-gpu-mock-tests
+        src/map/bgfx/map_bgfx_globe_overlay_gpu.cpp
+        tests/render_globe_overlay_gpu_mock_test.cpp)
+    target_link_libraries(aowis-render-globe-overlay-gpu-mock-tests PRIVATE
+        AOWIS::RenderGeometry)
+    target_include_directories(aowis-render-globe-overlay-gpu-mock-tests BEFORE PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mock_bgfx")
+    add_test(NAME aowis-render-globe-overlay-gpu-mock
+        COMMAND aowis-render-globe-overlay-gpu-mock-tests)
+    set_tests_properties(aowis-render-globe-overlay-gpu-mock PROPERTIES
+        LABELS "aowis;rendering")
+    # Base terrain GPU submission has its own independent mock regression.
     add_executable(aowis-render-globe-terrain-gpu-mock-tests
         src/map/bgfx/map_bgfx_globe_terrain_gpu.cpp
         tests/render_globe_terrain_gpu_mock_test.cpp)
@@ -358,6 +370,8 @@ if(AOWIS_RENDER_BUILD_MAP_CORE)
         src/map/bgfx/map_bgfx_globe_terrain_buffer_pool.cpp
         src/map/bgfx/map_bgfx_globe_terrain_gpu.h
         src/map/bgfx/map_bgfx_globe_terrain_gpu.cpp
+        src/map/bgfx/map_bgfx_globe_overlay_gpu.h
+        src/map/bgfx/map_bgfx_globe_overlay_gpu.cpp
         src/map/bgfx/map_bgfx_globe_buffer_pool.h
         src/map/bgfx/map_bgfx_globe_buffer_pool.cpp
         src/map/bgfx/map_bgfx_globe_vertex_layouts.h

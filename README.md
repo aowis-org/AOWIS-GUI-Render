@@ -246,3 +246,13 @@ submitted by Render with host-supplied heatmap program/texture/uniform handles.
 Release on the owning rendering thread before bgfx shutdown. The production
 implementation has a recording-bgfx mock test covering draw order, resource
 lifecycle, validation, and failure cleanup.
+
+### Globe sky and heatmap GPU resources
+
+`MapBgfxGlobeSkyGpu` and `MapBgfxGlobeHeatmapGpu` own the optional
+atmosphere and heatmap shader/uniform resources and draw submission. Sky uses a
+single static full-screen triangle. Heatmap atlas pages (four 2048² render
+textures, allocated on demand) and the transient clear/stamp passes belong to
+Render. The host supplies camera vectors and stamp vertices, chooses tile
+cells, tracks LRU/revisions, and maintains the 24-bakes-per-frame policy.
+Both owners support complete release/reinitialization on bgfx device changes.

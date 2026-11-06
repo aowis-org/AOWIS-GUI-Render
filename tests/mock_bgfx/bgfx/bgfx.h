@@ -5,12 +5,18 @@
 // target's include path; only the mock test compiles Render's actual .cpp
 // against it. No graphics device, Qt or bgfx checkout is required.
 #include <cstdint>
+#include <array>
+#include <algorithm>
+#include <limits>
 #include <cstring>
 #include <vector>
 
 #define BGFX_INVALID_HANDLE {static_cast<std::uint16_t>(0xffff)}
 #define BGFX_BUFFER_ALLOW_RESIZE 1u
 #define BGFX_BUFFER_INDEX32 2u
+#define BGFX_TEXTURE_RT (std::uint64_t(1) << 24)
+#define BGFX_CLEAR_NONE 0u
+#define BGFX_STATE_BLEND_ADD (std::uint64_t(1) << 25)
 #define BGFX_SAMPLER_U_CLAMP (std::uint64_t(1) << 22)
 #define BGFX_SAMPLER_V_CLAMP (std::uint64_t(1) << 23)
 #define BGFX_STATE_WRITE_RGB (std::uint64_t(1) << 0)
@@ -31,6 +37,8 @@ struct DynamicVertexBufferHandle { std::uint16_t idx; };
 struct DynamicIndexBufferHandle { std::uint16_t idx; };
 struct IndexBufferHandle { std::uint16_t idx; };
 struct ProgramHandle { std::uint16_t idx; };
+struct VertexBufferHandle { std::uint16_t idx; };
+struct FrameBufferHandle { std::uint16_t idx; };
 struct UniformHandle { std::uint16_t idx; };
 struct TextureHandle { std::uint16_t idx; };
 struct Attrib
@@ -55,6 +63,9 @@ struct VertexLayout
     VertexLayout &end() { return *this; }
     std::uint16_t getStride() const { return stride; }
 };
+struct ViewMode { enum Enum { Sequential }; };
+struct Caps { bool originBottomLeft = false; bool homogeneousDepth = false; };
+struct TransientVertexBuffer { std::uint8_t *data = nullptr; std::uint32_t size = 0; };
 struct TextureFormat { enum Enum { RGBA8 }; };
 struct UniformType { enum Enum { Mat4, Vec4, Sampler }; };
 struct Memory { std::vector<std::uint8_t> bytes; };
@@ -79,6 +90,17 @@ inline unsigned int uniform_calls = 0;
 inline unsigned int texture_calls = 0;
 inline unsigned int index_calls = 0;
 inline unsigned int created_vertex_buffers = 0;
+inline unsigned int created_static_vertex_buffers = 0;
+inline unsigned int destroyed_static_vertex_buffers = 0;
+inline unsigned int created_frame_buffers = 0;
+inline unsigned int destroyed_frame_buffers = 0;
+inline unsigned int transient_allocations = 0;
+inline std::uint32_t transient_capacity = std::numeric_limits<std::uint32_t>::max();
+inline bool fail_frame_buffer = false;
+inline bool origin_bottom_left = false;
+inline std::vector<std::vector<std::uint8_t>> transient_storage;
+inline std::vector<std::uint16_t> view_order;
+inline std::vector<std::uint16_t> frame_buffer_views;
 inline unsigned int created_index_buffers = 0;
 inline unsigned int created_static_index_buffers = 0;
 inline unsigned int destroyed_static_index_buffers = 0;
@@ -117,6 +139,17 @@ inline void reset()
     texture_calls = 0;
     index_calls = 0;
     created_vertex_buffers = 0;
+    created_static_vertex_buffers = 0;
+    destroyed_static_vertex_buffers = 0;
+    created_frame_buffers = 0;
+    destroyed_frame_buffers = 0;
+    transient_allocations = 0;
+    transient_capacity = std::numeric_limits<std::uint32_t>::max();
+    fail_frame_buffer = false;
+    origin_bottom_left = false;
+    transient_storage.clear();
+    view_order.clear();
+    frame_buffer_views.clear();
     created_index_buffers = 0;
     created_static_index_buffers = 0;
     destroyed_static_index_buffers = 0;
@@ -142,6 +175,60 @@ inline void reset()
 }
 }
 
+inline VertexBufferHandle createVertexBuffer(const Memory *memory, const VertexLayout &)
+{
+    ++mock::created_static_vertex_buffers;
+    delete memory;
+    return {mock::next_handle++};
+}
+inline FrameBufferHandle createFrameBuffer(std::uint8_t, const TextureHandle *, bool)
+{
+    if (mock::fail_frame_buffer)
+        return {0xffff};
+    ++mock::created_frame_buffers;
+    return {mock::next_handle++};
+}
+inline TextureHandle createTexture2D(std::uint16_t, std::uint16_t, bool,
+                                     std::uint16_t, TextureFormat::Enum,
+                                     std::uint64_t flags)
+{
+    mock::texture_flags = flags;
+    if (mock::fail_texture_after >= 0
+        && mock::created_textures >= static_cast<unsigned int>(mock::fail_texture_after))
+        return {0xffff};
+    ++mock::created_textures;
+    return {mock::next_handle++};
+}
+inline const Caps *getCaps()
+{
+    static Caps caps;
+    caps.originBottomLeft = mock::origin_bottom_left;
+    return &caps;
+}
+inline void setViewOrder(ViewId, std::uint16_t count, const ViewId *views)
+{
+    mock::view_order.assign(views, views + count);
+}
+inline void setViewFrameBuffer(ViewId view, FrameBufferHandle)
+{
+    mock::frame_buffer_views.push_back(view);
+}
+inline void setViewRect(ViewId, std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t) {}
+inline void setViewClear(ViewId, std::uint16_t) {}
+inline void setViewMode(ViewId, ViewMode::Enum) {}
+inline void setViewTransform(ViewId, const void *, const void *) {}
+inline std::uint32_t getAvailTransientVertexBuffer(std::uint32_t count, const VertexLayout &)
+{
+    return std::min(count, mock::transient_capacity);
+}
+inline void allocTransientVertexBuffer(TransientVertexBuffer *buffer, std::uint32_t count,
+                                       const VertexLayout &layout)
+{
+    ++mock::transient_allocations;
+    mock::transient_storage.emplace_back(std::size_t(count) * layout.getStride());
+    buffer->data = mock::transient_storage.back().data();
+    buffer->size = std::uint32_t(mock::transient_storage.back().size());
+}
 inline DynamicVertexBufferHandle createDynamicVertexBuffer(std::uint32_t,
                                                           const VertexLayout &, std::uint16_t)
 {
@@ -212,12 +299,22 @@ inline TextureHandle createTexture2D(std::uint16_t, std::uint16_t, bool has_mips
     ++mock::created_textures;
     return {mock::next_handle++};
 }
+inline void destroy(VertexBufferHandle) { ++mock::destroyed_static_vertex_buffers; }
+inline void destroy(FrameBufferHandle) { ++mock::destroyed_frame_buffers; }
 inline void destroy(UniformHandle) { ++mock::destroyed_uniforms; }
 inline void destroy(TextureHandle) { ++mock::destroyed_textures; }
 inline void destroy(ProgramHandle) { ++mock::destroyed_programs; }
 inline void destroy(DynamicVertexBufferHandle) { ++mock::destroyed_vertex_buffers; }
 inline void destroy(DynamicIndexBufferHandle) { ++mock::destroyed_index_buffers; }
 inline void destroy(IndexBufferHandle) { ++mock::destroyed_static_index_buffers; }
+inline void setVertexBuffer(std::uint8_t, VertexBufferHandle handle)
+{
+    mock::current_vertex = handle.idx;
+}
+inline void setVertexBuffer(std::uint8_t, const TransientVertexBuffer *)
+{
+    mock::current_vertex = 0xfffe;
+}
 inline void setVertexBuffer(std::uint8_t, DynamicVertexBufferHandle handle, std::uint32_t = 0, std::uint32_t = 0xffffffffu)
 {
     mock::current_vertex = handle.idx;
