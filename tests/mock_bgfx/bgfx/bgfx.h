@@ -19,6 +19,7 @@
 #define BGFX_STATE_WRITE_Z (std::uint64_t(1) << 3)
 #define BGFX_STATE_DEPTH_TEST_LEQUAL (std::uint64_t(1) << 4)
 #define BGFX_STATE_CULL_CW (std::uint64_t(1) << 5)
+#define BGFX_STATE_PT_LINES (std::uint64_t(1) << 6)
 #define BGFX_STATE_BLEND_ONE (1)
 #define BGFX_STATE_BLEND_INV_SRC_ALPHA (2)
 #define BGFX_STATE_BLEND_FUNC(src,dst) ((std::uint64_t(src) << 8) | (std::uint64_t(dst) << 16))
@@ -217,9 +218,14 @@ inline void destroy(ProgramHandle) { ++mock::destroyed_programs; }
 inline void destroy(DynamicVertexBufferHandle) { ++mock::destroyed_vertex_buffers; }
 inline void destroy(DynamicIndexBufferHandle) { ++mock::destroyed_index_buffers; }
 inline void destroy(IndexBufferHandle) { ++mock::destroyed_static_index_buffers; }
-inline void setVertexBuffer(std::uint8_t, DynamicVertexBufferHandle handle, std::uint32_t, std::uint32_t)
+inline void setVertexBuffer(std::uint8_t, DynamicVertexBufferHandle handle, std::uint32_t = 0, std::uint32_t = 0xffffffffu)
 {
     mock::current_vertex = handle.idx;
+}
+inline void setIndexBuffer(IndexBufferHandle)
+{
+    mock::current_indexed = true;
+    ++mock::index_calls;
 }
 inline void setIndexBuffer(DynamicIndexBufferHandle, std::uint32_t, std::uint32_t)
 {
@@ -227,7 +233,7 @@ inline void setIndexBuffer(DynamicIndexBufferHandle, std::uint32_t, std::uint32_
     ++mock::index_calls;
 }
 inline void setUniform(UniformHandle, const void *) { ++mock::uniform_calls; }
-inline void setTexture(std::uint8_t, UniformHandle, TextureHandle) { ++mock::texture_calls; }
+inline void setTexture(std::uint8_t, UniformHandle, TextureHandle, std::uint32_t = 0xffffffffu) { ++mock::texture_calls; }
 inline void setState(std::uint64_t state) { mock::current_state = state; }
 inline void submit(ViewId, ProgramHandle program)
 {

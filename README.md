@@ -233,3 +233,16 @@ counts and strides are checked before patching; failed updates request full
 reupload in the host. `release()` is required before bgfx device shutdown.
 The immutable per-resolution terrain/skirt index buffers remain in
 `MapBgfxGlobeTileIndexPool`.
+
+### Globe terrain GPU draw ownership
+
+`MapBgfxGlobeTerrainGpu` (`AOWIS::RenderCore`) owns the base globe terrain
+and wireframe shader programs, seven shared uniforms/samplers, two RGBA8
+fallback textures, and cap/tile/wireframe bgfx submission. It consumes only
+neutral bgfx handles and a five-vector frame uniform block. The host still
+prepares terrain tiles, DEM vertex patches, atlas rectangles, sky geometry,
+heatmap atlas baking and view ordering. Heatmap-composited terrain draws are
+submitted by Render with host-supplied heatmap program/texture/uniform handles.
+Release on the owning rendering thread before bgfx shutdown. The production
+implementation has a recording-bgfx mock test covering draw order, resource
+lifecycle, validation, and failure cleanup.
