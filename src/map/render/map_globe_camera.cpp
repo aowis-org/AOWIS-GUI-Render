@@ -65,6 +65,7 @@ void MapGlobeCamera::setViewportSize(const QSize &viewport_size)
 void MapGlobeCamera::syncFromMapModel(const MapModel &map_model)
 {
     const MapCameraViewState view = map_model.cameraViewState();
+    this->eye_pose = map_model.globeEyePose();
     this->target_lon_deg = view.center_lon_deg;
     this->target_lat_deg = view.center_lat_deg;
     this->yaw_deg = view.globe_yaw_deg;
@@ -77,7 +78,7 @@ void MapGlobeCamera::syncFromMapModel(const MapModel &map_model)
 void MapGlobeCamera::updateRenderOrigin()
 {
     const GeoWgs84Ellipsoid::EcefPositionD candidate =
-        GeoWgs84Ellipsoid::geodeticToEcefD(
+        this->eye_pose ? this->eye_pose->eye : GeoWgs84Ellipsoid::geodeticToEcefD(
             this->target_lon_deg, this->target_lat_deg,
             this->vertical_offset_m);
 
@@ -138,19 +139,6 @@ QMatrix4x4 MapGlobeCamera::viewProjectionMatrixForOrigin(
         MapModel::MaxViewGlobePitchDeg);
     const double bounded_distance_m = orbitDistanceM();
 
-    const GeoWgs84Ellipsoid::OrbitCameraBasisRelative basis =
-        GeoWgs84Ellipsoid::orbitCameraBasisRelativeToOrigin(
-            this->target_lon_deg, this->target_lat_deg,
-            this->yaw_deg, bounded_pitch_deg, bounded_distance_m,
-            this->vertical_offset_m, origin_ecef,
-            this->camera_collision_lift_m);
-    if (camera_basis != nullptr)
-    {
-        camera_basis->right = basis.right;
-        camera_basis->up = basis.up;
-        camera_basis->eye = basis.eye;
-    }
-
     double near_plane_m = 0.0;
     double far_plane_m = 0.0;
     globeNearFarPlanesM(
@@ -165,7 +153,36 @@ QMatrix4x4 MapGlobeCamera::viewProjectionMatrixForOrigin(
         float(near_plane_m), float(far_plane_m));
 
     QMatrix4x4 view;
-    view.lookAt(basis.eye, basis.target, basis.up);
+    if (this->eye_pose)
+    {
+        const MapGlobeEyePose &pose = *this->eye_pose;
+        const QVector3D eye(float(pose.eye.x - origin_ecef.x), float(pose.eye.y - origin_ecef.y),
+                            float(pose.eye.z - origin_ecef.z));
+        view.rotate(pose.orientation.conjugated());
+        view.translate(-eye);
+        if (camera_basis != nullptr)
+        {
+            camera_basis->eye = eye;
+            camera_basis->right = pose.orientation.rotatedVector(QVector3D(1, 0, 0));
+            camera_basis->up = pose.orientation.rotatedVector(QVector3D(0, 1, 0));
+        }
+    }
+    else
+    {
+        const GeoWgs84Ellipsoid::OrbitCameraBasisRelative basis =
+            GeoWgs84Ellipsoid::orbitCameraBasisRelativeToOrigin(
+                this->target_lon_deg, this->target_lat_deg,
+                this->yaw_deg, bounded_pitch_deg, bounded_distance_m,
+                this->vertical_offset_m, origin_ecef,
+                this->camera_collision_lift_m);
+        if (camera_basis != nullptr)
+        {
+            camera_basis->right = basis.right;
+            camera_basis->up = basis.up;
+            camera_basis->eye = basis.eye;
+        }
+        view.lookAt(basis.eye, basis.target, basis.up);
+    }
 
     QMatrix4x4 result = projection;
     result *= view;
@@ -177,6 +194,7 @@ bool MapGlobeCamera::screenRay(
     MapGlobeScreenRay *ray) const
 {
     MapGlobeScreenRayParameters parameters;
+    parameters.eye_pose = this->eye_pose;
     parameters.target_lon_deg = this->target_lon_deg;
     parameters.target_lat_deg = this->target_lat_deg;
     parameters.yaw_deg = this->yaw_deg;

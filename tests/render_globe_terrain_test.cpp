@@ -4,6 +4,7 @@
 // Checks do not depend on assert(), so they also run in Release builds.
 
 #include "map/core/map_model.h"
+#include "map/render/map_globe_camera.h"
 #include "map/data/map_terrain_tile_source.h"
 #include "map/render/map_globe_surface_preparation.h"
 #include "map/render/map_globe_terrain_navigation.h"
@@ -11,6 +12,7 @@
 #include <QSize>
 
 #include <cstdio>
+#include <cmath>
 #include <functional>
 
 namespace
@@ -67,6 +69,45 @@ public:
         return this->catalog_known ? &this->dataset : nullptr;
     }
 };
+
+void testFixedEyeCamera()
+{
+    const QSize viewport(800, 400);
+    MapModel model;
+    model.setViewMode(MapViewMode::Globe, viewport);
+    MapGlobeCamera camera;
+    camera.setViewportSize(viewport);
+    camera.syncFromMapModel(model);
+    MapGlobeScreenRay original;
+    expectTrue(camera.screenRay(QPointF(400, 200), &original), "initial orbit ray");
+    MapGlobeEyePose pose;
+    pose.eye = original.origin_ecef;
+    for (int angle : {0, 90, 180, 270})
+    {
+        pose.orientation = QQuaternion::fromAxisAndAngle(0, 1, 0, angle)
+            * QQuaternion::fromAxisAndAngle(0, 0, 1, 35);
+        model.setGlobeEyePose(pose);
+        camera.syncFromMapModel(model);
+        camera.updateRenderOrigin();
+        MapGlobeScreenRay ray;
+        expectTrue(camera.screenRay(QPointF(600, 100), &ray), "off-center fixed-eye ray");
+        expectTrue(ray.origin_ecef.x == original.origin_ecef.x
+                   && ray.origin_ecef.y == original.origin_ecef.y
+                   && ray.origin_ecef.z == original.origin_ecef.z, "rotating preserves the exact eye");
+        const QVector3D projected = camera.viewProjectionMatrixForOrigin(pose.eye)
+            .map(ray.direction * 100000.0f);
+        expectTrue(std::abs(projected.x() - 0.5f) < 0.0001f
+                   && std::abs(projected.y() - 0.5f) < 0.0001f, "rolled matrix agrees with the screen ray");
+        camera.screenRay(QPointF(400, 200), &ray);
+        expectTrue((ray.direction - pose.orientation.rotatedVector(QVector3D(0, 0, -1))).length()
+                   < 0.0001f, "screen faces along the device back axis");
+    }
+    model.setGlobeEyePose(std::nullopt);
+    camera.syncFromMapModel(model);
+    MapGlobeScreenRay restored;
+    camera.screenRay(QPointF(400, 200), &restored);
+    expectTrue((restored.direction - original.direction).length() < 0.0001f, "exit restores orbit");
+}
 
 void testTerrainLevels()
 {
@@ -127,6 +168,7 @@ void testPreparationUsesSource()
 
 int main()
 {
+    testFixedEyeCamera();
     testTerrainLevels();
     testPreparationUsesSource();
     if (g_failures != 0)

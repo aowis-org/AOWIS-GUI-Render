@@ -4,6 +4,7 @@
 #include "map/core/map_view_types.h"
 
 #include <cmath>
+#include <cstdint>
 
 // Continuous, backend-neutral camera data. No tile zoom, raster cache zoom,
 // GPU-resource revision or network geometry revision belongs in this state.
@@ -19,6 +20,7 @@ struct MapCameraViewState
     double globe_pitch_deg = 90.0;
     double globe_distance_m = 1.0;
     double globe_vertical_offset_m = 0.0;
+    std::uint64_t globe_pose_revision = 0;
     double globe_collision_lift_m = 0.0;
 };
 
@@ -41,7 +43,8 @@ inline MapCameraUpdate mapCameraUpdate(
         || previous.center_lat_deg != current.center_lat_deg;
     const bool view_changed = previous.mode != current.mode;
     const bool flat_changed = previous.continuous_2d_zoom != current.continuous_2d_zoom;
-    const bool globe_changed = previous.globe_yaw_deg != current.globe_yaw_deg
+    const bool globe_changed = previous.globe_pose_revision != current.globe_pose_revision
+        || previous.globe_yaw_deg != current.globe_yaw_deg
         || previous.globe_pitch_deg != current.globe_pitch_deg
         || previous.globe_distance_m != current.globe_distance_m
         || previous.globe_vertical_offset_m != current.globe_vertical_offset_m

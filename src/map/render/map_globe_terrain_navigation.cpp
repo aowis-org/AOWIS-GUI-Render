@@ -526,7 +526,7 @@ void MapGlobeTerrainNavigation::syncCameraHeight(bool request_missing_tile)
         return;
 
     if (this->map_model == nullptr || this->map_model->viewMode() != MapViewMode::Globe
-        || !this->viewport_size.isValid())
+        || this->map_model->globeEyePose() || !this->viewport_size.isValid())
     {
         stopFollowing();
         return;

@@ -7,6 +7,16 @@
 #include <QSize>
 #include <QVector3D>
 
+#include <QQuaternion>
+#include <optional>
+
+// Screen-local axes (+X right, +Y up, -Z forward) expressed in ECEF.
+struct MapGlobeEyePose
+{
+    GeoWgs84Ellipsoid::EcefPositionD eye;
+    QQuaternion orientation;
+};
+
 struct MapGlobeScreenRayParameters
 {
     double target_lon_deg = 0.0;
@@ -17,6 +27,7 @@ struct MapGlobeScreenRayParameters
     double target_height_m = 0.0;
     double collision_lift_m = 0.0;
     double field_of_view_deg = 45.0;
+    std::optional<MapGlobeEyePose> eye_pose;
 };
 
 struct MapGlobeScreenRay

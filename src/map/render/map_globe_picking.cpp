@@ -20,6 +20,16 @@ bool mapGlobeBuildScreenRay(
         return false;
     }
 
+    if (parameters.eye_pose)
+    {
+        const float tangent = float(std::tan(qDegreesToRadians(parameters.field_of_view_deg * 0.5)));
+        const float x = float(2.0 * screen_position.x() - viewport_size.width()) / viewport_size.height();
+        const float y = float(viewport_size.height() - 2.0 * screen_position.y()) / viewport_size.height();
+        ray->origin_ecef = parameters.eye_pose->eye;
+        ray->direction = parameters.eye_pose->orientation.rotatedVector(
+            QVector3D(x * tangent, y * tangent, -1.0f)).normalized();
+        return true;
+    }
     const GeoWgs84Ellipsoid::EcefPositionD local_origin =
         GeoWgs84Ellipsoid::geodeticToEcefD(
             parameters.target_lon_deg,

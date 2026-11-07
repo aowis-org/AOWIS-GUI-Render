@@ -14,6 +14,7 @@
 #include "geo/geo_wgs84_ellipsoid.h"
 #include "map/core/map_view_types.h"
 #include "map/render/map_camera_view_state.h"
+#include "map/render/map_globe_picking.h"
 
 class MapImageryProviderDirectory;
 
@@ -115,6 +116,8 @@ public:
     static constexpr double ViewGlobeOrbitPitchDegreesPerPixel = 0.25;
 
     MapCameraViewState cameraViewState() const;
+    const std::optional<MapGlobeEyePose> &globeEyePose() const { return this->m_eye_pose; }
+    void setGlobeEyePose(const std::optional<MapGlobeEyePose> &pose);
     // The one 2D camera zoom (Web Mercator level, MinZoom..MaxZoom, any
     // fraction). There is no integer zoom state: the imagery tile level is
     // derived from it where tiles are drawn (MapBgfx2dImagery::imageryZoomFor()).
@@ -294,6 +297,8 @@ private:
 
     MapProvider m_provider = MapProvider::ArcGISSat;
     QString m_provider_id = QStringLiteral("a0d790c2-f231-55fd-b95e-23c9bd6cb3fc");
+    std::optional<MapGlobeEyePose> m_eye_pose;
+    quint64 m_pose_revision = 0;
     MapViewMode m_view_mode = MapViewMode::TwoD;
     double m_view_3d_network_ground_offset_m = 0.0;
     double m_view_3d_vertical_exaggeration = DefaultView3dVerticalExaggeration;

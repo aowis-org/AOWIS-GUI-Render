@@ -48,6 +48,7 @@ public:
     double orbitDistanceM() const;
 
 private:
+    std::optional<MapGlobeEyePose> eye_pose;
     QSize viewport_size;
     double target_lon_deg = 0.0;
     double target_lat_deg = 0.0;

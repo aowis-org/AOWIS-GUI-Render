@@ -119,6 +119,7 @@ MapCameraViewState MapModel::cameraViewState() const
     state.globe_pitch_deg = this->m_view_globe_pitch_deg;
     state.globe_distance_m = this->m_view_globe_distance_m;
     state.globe_vertical_offset_m = this->m_view_globe_vertical_offset_m;
+    state.globe_pose_revision = this->m_pose_revision;
     state.globe_collision_lift_m = this->m_view_globe_camera_collision_lift_m;
     return state;
 }
@@ -478,12 +479,20 @@ void MapModel::panByPixels(const QPoint &delta, const QSize &viewport)
         viewport);
 }
 
+void MapModel::setGlobeEyePose(const std::optional<MapGlobeEyePose> &pose)
+{
+    this->m_eye_pose = pose;
+    ++this->m_pose_revision;
+    emit viewGlobeCameraChanged();
+}
+
 bool MapModel::globeScreenRay(
     const QPointF &screen_position, const QSize &viewport, MapGlobeScreenRay *ray) const
 {
     // The rendered camera's ray (MapGlobeCamera::screenRay()), eye in double
     // precision: an Earth-scale float eye is quantised by about half a metre.
     MapGlobeScreenRayParameters parameters;
+    parameters.eye_pose = this->m_eye_pose;
     parameters.target_lon_deg = this->m_centerLon;
     parameters.target_lat_deg = this->m_centerLat;
     parameters.yaw_deg = this->m_view_globe_yaw_deg;
@@ -827,6 +836,7 @@ void MapModel::setViewMode(MapViewMode view_mode, const QSize &viewport)
             this->m_view_globe_distance_m, this->m_centerLat, viewport_height_px);
     }
 
+    this->m_eye_pose.reset();
     this->m_view_mode = view_mode;
 
     // A Globe center may legitimately sit anywhere up to the true poles.

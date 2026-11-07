@@ -458,7 +458,7 @@ QVector<MapGlobeQuadtreeLeaf> MapGlobeSurfaceScene::selectVisibleLeaves(
         MapModel::MinViewGlobeDistanceM,
         map_model.viewGlobeDistanceM());
 
-    const GeoWgs84Ellipsoid::OrbitCameraBasis visibility_camera_basis =
+    GeoWgs84Ellipsoid::OrbitCameraBasis visibility_camera_basis =
         GeoWgs84Ellipsoid::orbitCameraBasis(
             map_model.centerLon(),
             map_model.centerLat(),
@@ -468,13 +468,22 @@ QVector<MapGlobeQuadtreeLeaf> MapGlobeSurfaceScene::selectVisibleLeaves(
             map_model.viewGlobeVerticalOffsetM(),
             map_model.viewGlobeCameraCollisionLiftM());
 
-    const GeoWgs84Ellipsoid::OrbitCameraBasis lod_camera_basis =
+    GeoWgs84Ellipsoid::OrbitCameraBasis lod_camera_basis =
         GeoWgs84Ellipsoid::orbitCameraBasis(
             map_model.centerLon(),
             map_model.centerLat(),
             map_model.viewGlobeYawDeg(),
             pitch_deg,
             distance_m);
+    if (map_model.globeEyePose())
+    {
+        const MapGlobeEyePose &pose = *map_model.globeEyePose();
+        visibility_camera_basis.eye = QVector3D(float(pose.eye.x), float(pose.eye.y), float(pose.eye.z));
+        visibility_camera_basis.forward = pose.orientation.rotatedVector(QVector3D(0, 0, -1));
+        visibility_camera_basis.right = pose.orientation.rotatedVector(QVector3D(1, 0, 0));
+        visibility_camera_basis.up = pose.orientation.rotatedVector(QVector3D(0, 1, 0));
+        lod_camera_basis = visibility_camera_basis;
+    }
     const double viewport_height_px = double(qMax(1, viewport_size.height()));
     const double half_fov_rad = qDegreesToRadians(
         MapModel::GlobeFieldOfViewDeg * 0.5);
