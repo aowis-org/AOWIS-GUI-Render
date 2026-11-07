@@ -75,9 +75,10 @@ public:
     // Gives the map keyboard focus (a click on the native window); the host
     // activates its window and its key receiver.
     virtual void mapViewFocusNavigationInput(Qt::FocusReason reason) = 0;
-    // WASM only (no native window): the host area's logical size, device
-    // pixel ratio, screen and global position, and the pointer shape over
-    // it (Qt::ArrowCursor resets it).
+    // Without a native window of the view's own (WASM canvas, host
+    // context): the host area's logical size, device pixel ratio, screen and
+    // global position (WASM), and the pointer shape over it
+    // (Qt::ArrowCursor resets it).
     virtual QSize mapViewLogicalSize() const = 0;
     virtual qreal mapViewDevicePixelRatio() const = 0;
     virtual QScreen *mapViewScreen() const = 0;
@@ -103,8 +104,42 @@ class MapBgfxMapView final : public QObject
 {
     Q_OBJECT
 public:
-    MapBgfxMapView(MapModel *model, MapBgfxMapViewHost *view_host, QObject *parent = nullptr);
+    // Where the view renders.
+    // - NativeWindow: into its own QWindow (desktop; the host embeds
+    //   nativeInputWindow()) or the browser canvas (WASM), with its own
+    //   device, swapchain and frame loop.
+    // - HostContext: inside a graphics context the host owns and presents,
+    //   e.g. Qt Quick's OpenGL / OpenGL ES scene graph: no window, no swap,
+    //   no frame loop. The host calls renderHostFrame() from its render pass
+    //   (context current, on the view's thread: Qt Quick's basic render
+    //   loop) and schedules a pass on hostFrameRequested().
+    enum class RenderTarget
+    {
+        NativeWindow,
+        HostContext
+    };
+    MapBgfxMapView(MapModel *model, MapBgfxMapViewHost *view_host,
+                   RenderTarget target = RenderTarget::NativeWindow,
+                   QObject *parent = nullptr);
     ~MapBgfxMapView() override;
+    RenderTarget renderTarget() const { return this->render_target; }
+
+    // --- Host context ---------------------------------------------------------------
+    // The host's current native context (EGLContext / GLXContext / ...) and
+    // its API. bgfx is initialized in it on the first frame.
+    struct HostContext
+    {
+        void *native_context = nullptr;
+        bool opengl_es = false;
+    };
+    // Draws one complete frame into the host's bound framebuffer (the host
+    // fenced its own state, e.g. QQuickWindow::beginExternalCommands()).
+    // False when nothing was drawn (hidden, failed, device busy).
+    bool renderHostFrame(const HostContext &context);
+    // The host's context is about to go away (scene graph invalidated):
+    // releases every GPU object and bgfx itself, with that context current.
+    // The next renderHostFrame() initializes again.
+    void releaseHostContext();
 
     // --- Host integration ---------------------------------------------------------
     // Native handle discovery for a QWindow (desktop). Default:
@@ -357,6 +392,8 @@ public:
     void setMapCursor(Qt::CursorShape shape);
 
 signals:
+    // Host context: the view wants a render pass (QQuickWindow::update()).
+    void hostFrameRequested();
     void signalRendererReady();
     void signalRendererFailed(const QString &reason);
     // Host-produced HUD strings (legend, units, tooltips) need regeneration
@@ -372,6 +409,16 @@ private:
     BgfxNativeSurface captureNativeSurface(QWindow *window) const;
 #endif
     bool initializeBackend();
+    // After bgfx::init(): shader check, views, default target, GPU parts.
+    bool adoptInitializedDevice();
+    bool initializeHostContext(const HostContext &context);
+#ifndef Q_OS_WASM
+    void createNativeWindow();
+#endif
+    // The view's own native window, else the host's area.
+    QSize viewLogicalPixels() const;
+    qreal viewDevicePixelRatio() const;
+    QScreen *viewScreen() const;
     void startFrameLoop();
     void stopFrameLoop();
     double refreshPeriodSeconds() const;
@@ -462,6 +509,7 @@ private:
     NavigationMouseHandler navigation_mouse_press;
     NavigationMouseHandler navigation_mouse_release;
     NavigationMouseHandler navigation_mouse_move;
+    RenderTarget render_target = RenderTarget::NativeWindow;
     MapBgfxMapViewHost *host = nullptr;
     MapModel *map_model = nullptr;
     NativeSurfaceCapture native_surface_capture;
@@ -614,6 +662,8 @@ private:
     QElapsedTimer frame_clock;
     MapFramePacer frame_pacer;
     bool frame_loop_running = false;
+    // The last frame's animation state (host context: ask for another pass).
+    bool frame_animating = false;
     double last_frame_time_ms = -1.0;
     QSize last_physical_size;
     MapUndergroundMode underground_mode = MapUndergroundMode::XRay;

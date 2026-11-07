@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <utility>
 #include <vector>
 
 // Owns process-wide bgfx view-ID reservations and the one frame submission
@@ -47,10 +48,16 @@ public:
     // Reserving a view does not require submitting it in every frame.
     bool present(const void *client);
     bool renderAndPresent(const std::vector<RenderWork> &work);
+    // present() for a client that renders into a host-owned context: the
+    // same checks, but the frame is executed without a swap (the host
+    // presents). Needs setFlushSubmit().
+    bool flush(const void *client);
+    void setFlushSubmit(Submit flush_submit) { this->flush_api = std::move(flush_submit); }
     void reset();
     std::uint16_t capacity() const { return this->view_capacity; }
 
 private:
+    bool submitWork(const std::vector<RenderWork> &work, const Submit &submit);
     struct Reservation
     {
         const void *client = nullptr;
@@ -58,6 +65,7 @@ private:
     };
     const std::uint16_t view_capacity;
     Submit submit_api;
+    Submit flush_api;
     std::vector<Reservation> reservations;
     bool presenting = false;
 };

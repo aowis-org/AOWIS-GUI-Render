@@ -83,9 +83,21 @@ bool BgfxFrameCoordinator::present(const void *client)
     return renderAndPresent({RenderWork{client, {}}});
 }
 
+bool BgfxFrameCoordinator::flush(const void *client)
+{
+    if (this->reservations.size() != 1 || !this->flush_api)
+        return false;
+    return submitWork({RenderWork{client, {}}}, this->flush_api);
+}
+
 bool BgfxFrameCoordinator::renderAndPresent(const std::vector<RenderWork> &work)
 {
-    if (work.empty() || !this->submit_api || this->presenting)
+    return submitWork(work, this->submit_api);
+}
+
+bool BgfxFrameCoordinator::submitWork(const std::vector<RenderWork> &work, const Submit &submit)
+{
+    if (work.empty() || !submit || this->presenting)
         return false;
     // Preflight everything before executing any draw. Failed validation must
     // never produce a partially submitted frame.
@@ -107,7 +119,7 @@ bool BgfxFrameCoordinator::renderAndPresent(const std::vector<RenderWork> &work)
             if (item.draw)
                 item.draw();
         }
-        this->submit_api(); // Exactly one process-global frame for the batch.
+        submit(); // Exactly one process-global frame for the batch.
     }
     catch (...)
     {

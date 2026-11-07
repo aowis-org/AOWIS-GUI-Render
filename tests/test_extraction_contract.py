@@ -175,4 +175,22 @@ for relative in ["src/map/bgfx/bgfx_device_manager.cpp", "src/map/bgfx/bgfx_devi
                  "src/map/bgfx/bgfx_native_target_registry.cpp", "src/map/bgfx/bgfx_native_target_registry.h",
                  "src/map/bgfx/bgfx_native_surface.h"]:
     assert not re.search(r"#include\s+<Q", (root / relative).read_text()), relative
+# Host-context rendering (Qt Quick): no window, flushed frames, the host
+# presents.
+assert "        HostContext\n" in view_header and "bool renderHostFrame(" in view_header
+assert "frames().flush(this)" in view_source and "settings.platformData.context = context.native_context" in view_source
+assert "BGFX_FRAME_FLUSH" in (root / "src/map/bgfx/bgfx_device_manager.cpp").read_text()
+# Map server REST client: Render-owned, configured by the host.
+assert "add_library(aowis-render-map-rest STATIC" in cmake and "AOWIS::RenderMapRest" in cmake
+for relative in ["src/services/rest_client.h", "src/services/rest_client.cpp",
+                 "src/services/interface_server_map_rest.h", "src/services/interface_server_map_rest.cpp",
+                 "src/services/map_server_rest_configuration.h",
+                 "src/map/core/map_provider_catalog.h", "src/map/core/map_provider_catalog.cpp",
+                 "src/map/core/map_provider_fallback_resolution.h"]:
+    text = (root / relative).read_text()
+    for included in re.findall(r'#include\s+"([^"]+)"', text):
+        assert (root / "src" / included).is_file(), relative + " includes " + included
+    for token in ["guiConfiguration", "mapServerClientConfiguration", "mapProviderCatalog()", "QSettings"]:
+        assert token not in text, relative + " uses " + token
+    assert not re.search(r"\bauto\s+\w", text), relative
 print("Renderer extraction and shader-family contract: OK")

@@ -13,6 +13,8 @@ BgfxDeviceManager::BgfxDeviceManager(
       native_targets(std::move(create_target), std::move(bind_target),
                      std::move(destroy_target))
 {
+    // Host-context clients (Qt Quick) execute their frame without a swap.
+    this->frame_coordinator.setFlushSubmit([]() { bgfx::frame(BGFX_FRAME_FLUSH); });
     if (!this->initialize_api)
         this->initialize_api = [](const bgfx::Init &settings) { return bgfx::init(settings); };
     if (!this->shutdown_api)

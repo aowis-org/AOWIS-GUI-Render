@@ -116,6 +116,20 @@ registered resources without source-level dependency on GUI resource files.
   (`AOWIS::RenderQtSurface`) unless the host overrides the capture. The GUI's `MapBgfxSurface` is that host
   for Qt Widgets.
 
+- `MapBgfxMapView::RenderTarget::HostContext`: the view renders inside a
+  graphics context the host owns and presents (Qt Quick's OpenGL / OpenGL ES
+  scene graph): `renderHostFrame()` from the host's render pass,
+  `releaseHostContext()` on scene-graph invalidation, `hostFrameRequested()`
+  to schedule a pass. Frames are flushed (`BGFX_FRAME_FLUSH`), never swapped.
+
+**Map server REST client** (`AOWIS::RenderMapRest`, Qt Network)
+
+- `RESTClient`, `InterfaceServerMapREST` (the map/terrain transport) and
+  `MapProviderCatalog` (the server's imagery providers, a
+  `MapImageryProviderDirectory`), configured by the host's
+  `MapServerRestConfiguration`; the host stores the user's provider
+  fallbacks.
+
 **Network render contract**
 
 - `network/network_render_snapshot.h`, `network/network_symbology*.h`,

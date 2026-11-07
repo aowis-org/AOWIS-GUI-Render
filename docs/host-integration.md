@@ -37,6 +37,17 @@ imagery, terrain, network, labels, HUD, picking and terrain queries. It is a
 - inject `setTerrainDetailReductionSource()`, `setGlobeModelImages()`,
   `setHudImages()`, `setHudNavigationKeys()`, `setHudScaleProvider()` and
   `setGlobeHudStateProvider()`;
+- in a Qt Quick host, construct the view with
+  `RenderTarget::HostContext`: call `renderHostFrame({egl_context, gles})`
+  from `QQuickWindow::beforeRenderPassRecording` inside
+  `beginExternalCommands()` / `endExternalCommands()`, on the view's thread
+  (Qt Quick's basic render loop), call `releaseHostContext()` from
+  `sceneGraphInvalidated`, and `update()` the window on
+  `hostFrameRequested()`. Input goes to the host's own items, which drive
+  `MapModel`;
+- tiles and terrain from aowis-server-map: `AOWIS::RenderMapRest`
+  (`InterfaceServerMapREST` via a `MapServerTransport`, `MapProviderCatalog`
+  as the `MapImageryProviderDirectory`);
 - native handles default to `BgfxQtNativeSurface::capture()`;
   `setNativeSurfaceCapture()` overrides it;
 - the WASM page provides `window.aowisBgfxMap` (the browser canvas bridge).

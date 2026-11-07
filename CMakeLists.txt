@@ -474,6 +474,52 @@ if(AOWIS_RENDER_BUILD_MAP_DATA)
     endif()
 endif()
 
+# The aowis-server-map REST client (Qt Network): the map/terrain transport
+# for the data repositories (InterfaceServerMapREST) and the server's imagery
+# provider catalog (MapProviderCatalog, a MapImageryProviderDirectory). The
+# host supplies the server (MapServerRestConfiguration) and stores the
+# user's provider fallbacks.
+option(AOWIS_RENDER_BUILD_MAP_REST
+    "Build the map server REST client (Qt6 Network, RenderMapData)" ${AOWIS_RENDER_BUILD_MAP_DATA})
+if(AOWIS_RENDER_BUILD_MAP_REST AND NOT AOWIS_RENDER_BUILD_MAP_DATA)
+    message(FATAL_ERROR "AOWIS_RENDER_BUILD_MAP_REST requires AOWIS_RENDER_BUILD_MAP_DATA")
+endif()
+if(AOWIS_RENDER_BUILD_MAP_REST)
+    find_package(Qt6 REQUIRED COMPONENTS Core Network)
+    add_library(aowis-render-map-rest STATIC
+        src/services/map_server_rest_configuration.h
+        src/services/rest_client.h
+        src/services/rest_client.cpp
+        src/services/interface_server_map_rest.h
+        src/services/interface_server_map_rest.cpp
+        src/map/core/map_provider_catalog.h
+        src/map/core/map_provider_catalog.cpp
+        src/map/core/map_provider_fallback_resolution.h)
+    add_library(AOWIS::RenderMapRest ALIAS aowis-render-map-rest)
+    set_target_properties(aowis-render-map-rest PROPERTIES AUTOMOC ON)
+    target_compile_features(aowis-render-map-rest PUBLIC cxx_std_20)
+    target_include_directories(aowis-render-map-rest PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(aowis-render-map-rest PUBLIC
+        Qt6::Core Qt6::Network AOWIS::RenderMapData AOWIS::RenderView)
+
+    if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
+        # No server: fallback resolution, catalog configuration and the
+        # transport's construction only.
+        foreach(aowis_render_map_rest_test IN ITEMS map_provider_fallback_resolution render_map_rest)
+            string(REPLACE "_" "-" aowis_render_map_rest_test_name "${aowis_render_map_rest_test}")
+            add_executable(aowis-render-${aowis_render_map_rest_test_name}-tests
+                tests/${aowis_render_map_rest_test}_test.cpp)
+            target_link_libraries(aowis-render-${aowis_render_map_rest_test_name}-tests
+                PRIVATE AOWIS::RenderMapRest)
+            add_test(NAME aowis-render-${aowis_render_map_rest_test_name}
+                COMMAND aowis-render-${aowis_render_map_rest_test_name}-tests)
+            set_tests_properties(aowis-render-${aowis_render_map_rest_test_name} PROPERTIES
+                LABELS "aowis;integration" ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        endforeach()
+    endif()
+endif()
+
 # CPU side of the globe terrain: quadtree leaf selection and LOD, the
 # retained tile window with sparse DEM patches, the terrain mesh worker
 # (normals, skirts, ancestor stand-ins), terrain-aware navigation, the globe
@@ -789,7 +835,7 @@ if(AOWIS_RENDER_BUILD_MAP)
         # the native-window focus policy.
         foreach(aowis_render_map_test IN ITEMS
                 bgfx_entity_style bgfx_2d_picking map_bgfx_layer_visibility bgfx_hud bgfx_labels
-                map_bgfx_map_view map_input_focus_policy)
+                map_bgfx_map_view map_input_focus_policy bgfx_frame_coordinator_flush)
             string(REPLACE "_" "-" aowis_render_map_test_name "${aowis_render_map_test}")
             add_executable(aowis-render-${aowis_render_map_test_name}-tests
                 tests/${aowis_render_map_test}_test.cpp)

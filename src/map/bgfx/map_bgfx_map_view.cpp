@@ -169,8 +169,10 @@ quintptr g_bgfx_frame_loop_generation = 0;
 #endif
 }
 
-MapBgfxMapView::MapBgfxMapView(MapModel *model, MapBgfxMapViewHost *view_host, QObject *parent)
-    : QObject(parent), host(view_host), map_model(model), terrain_navigation(model)
+MapBgfxMapView::MapBgfxMapView(MapModel *model, MapBgfxMapViewHost *view_host,
+                               RenderTarget target, QObject *parent)
+    : QObject(parent), render_target(target), host(view_host), map_model(model),
+      terrain_navigation(model)
 {
     Q_ASSERT(this->map_model != nullptr);
     Q_ASSERT(this->host != nullptr);
@@ -321,7 +323,32 @@ MapBgfxMapView::MapBgfxMapView(MapModel *model, MapBgfxMapViewHost *view_host, Q
     this->frame_timer.setTimerType(Qt::PreciseTimer);
     connect(&this->frame_timer, &QTimer::timeout, this, &MapBgfxMapView::renderFrame);
 
+    if (this->render_target == RenderTarget::HostContext)
+    {
+        // No frame loop of its own: whatever changes the picture asks the
+        // host for a frame (requestRedraw() -> hostFrameRequested()),
+        // including camera changes the host's gestures make on the model.
+        connect(this->map_model, &MapModel::view2dContinuousZoomChanged, this,
+                [this](double) { requestRedraw(); });
+        connect(this->map_model, &MapModel::centerChangedWGS84, this,
+                [this](CoordinateWGS84) { requestRedraw(); });
+        connect(this->map_model, &MapModel::viewGlobeCameraChanged, this,
+                [this]() { requestRedraw(); });
+        connect(this->map_model, &MapModel::viewGlobeTerrainHeightChanged, this,
+                [this]() { requestRedraw(); });
+        connect(this->map_model, &MapModel::viewModeChanged, this,
+                [this](MapViewMode) { requestRedraw(); });
+    }
+
 #ifndef Q_OS_WASM
+    if (this->render_target == RenderTarget::NativeWindow)
+        createNativeWindow();
+#endif
+}
+
+#ifndef Q_OS_WASM
+void MapBgfxMapView::createNativeWindow()
+{
     // The host embeds this window (QWidget::createWindowContainer() or a
     // QQuickItem) and owns it from then on.
     this->native_window = new QWindow();
@@ -337,11 +364,8 @@ MapBgfxMapView::MapBgfxMapView(MapModel *model, MapBgfxMapViewHost *view_host, Q
 #else
     this->native_window->setSurfaceType(QSurface::OpenGLSurface);
 #endif
-#endif
-    // The frame timer samples the continuous camera, NOT integer tile zoom.
-    // Signal connections are deliberately unnecessary: a camera move causes
-    // no scene changes or uploads in this early backend.
 }
+#endif
 
 MapBgfxMapView::~MapBgfxMapView()
 {
@@ -353,7 +377,12 @@ MapBgfxMapView::~MapBgfxMapView()
         g_bgfx_frame_loop_surface = nullptr;
 #endif
     if (this->initialized)
+    {
+        if (this->render_target == RenderTarget::HostContext)
+            qWarning() << "bgfx map: destroyed before releaseHostContext(); "
+                          "releasing GPU resources outside the host's render pass";
         shutdownBackend();
+    }
 #ifdef Q_OS_WASM
     // The canvas is shared; only the last surface removes it.
     if (!BgfxDeviceManager::shared().hasOwner())
@@ -1509,6 +1538,8 @@ void MapBgfxMapView::setHudViewSwitchVisible(bool visible)
 void MapBgfxMapView::requestRedraw()
 {
     this->redraw_requested = true;
+    if (this->render_target == RenderTarget::HostContext)
+        emit hostFrameRequested();
 }
 
 void MapBgfxMapView::setOverlayBuilder(OverlayBuilder builder)
@@ -1738,9 +1769,12 @@ void MapBgfxMapView::setMapCursor(Qt::CursorShape shape)
 {
 #ifndef Q_OS_WASM
     // The embedded native window has its own cursor; MapWidget's cursor is
-    // never shown over it.
+    // never shown over it. Without one (host context) the host sets it.
     if (this->native_window == nullptr)
+    {
+        this->host->mapViewSetCursor(shape);
         return;
+    }
     if (shape != Qt::ArrowCursor)
         this->native_window->setCursor(shape);
     else
@@ -1754,13 +1788,8 @@ void MapBgfxMapView::renderOverlay(const QSizeF &logical, const MapBgfx2d::Camer
 {
     if (!this->overlay_builder || !this->overlay_gpu.ready())
         return;
-#ifdef Q_OS_WASM
-    const qreal ratio = this->host->mapViewDevicePixelRatio();
-    const QScreen *overlay_screen = this->host->mapViewScreen();
-#else
-    const qreal ratio = this->native_window->devicePixelRatio();
-    const QScreen *overlay_screen = this->native_window->screen();
-#endif
+    const qreal ratio = viewDevicePixelRatio();
+    const QScreen *overlay_screen = viewScreen();
     this->overlay_text_cache.setDevicePixelRatio(ratio);
     if (overlay_screen != nullptr)
         this->overlay_text_cache.setLogicalDpi(overlay_screen->logicalDotsPerInch());
@@ -1815,13 +1844,8 @@ void MapBgfxMapView::renderGlobeOverlay(const QSizeF &logical)
 {
     if (!this->globe_overlay_builder || !this->overlay_gpu.ready())
         return;
-#ifdef Q_OS_WASM
-    const qreal ratio = this->host->mapViewDevicePixelRatio();
-    const QScreen *overlay_screen = this->host->mapViewScreen();
-#else
-    const qreal ratio = this->native_window->devicePixelRatio();
-    const QScreen *overlay_screen = this->native_window->screen();
-#endif
+    const qreal ratio = viewDevicePixelRatio();
+    const QScreen *overlay_screen = viewScreen();
     this->overlay_text_cache.setDevicePixelRatio(ratio);
     if (overlay_screen != nullptr)
         this->overlay_text_cache.setLogicalDpi(overlay_screen->logicalDotsPerInch());
@@ -2024,13 +2048,8 @@ void MapBgfxMapView::renderLabels(const QSizeF &logical, const MapBgfx2d::Camera
     {
         return;
     }
-#ifdef Q_OS_WASM
-    const qreal ratio = this->host->mapViewDevicePixelRatio();
-    const QScreen *label_screen = this->host->mapViewScreen();
-#else
-    const qreal ratio = this->native_window->devicePixelRatio();
-    const QScreen *label_screen = this->native_window->screen();
-#endif
+    const qreal ratio = viewDevicePixelRatio();
+    const QScreen *label_screen = viewScreen();
     if (!this->label_text_cache)
         this->label_text_cache = std::make_unique<MapBgfxHudTextCache>(2048);
     MapBgfxHudTextCache *cache = this->label_text_cache.get();
@@ -2133,13 +2152,8 @@ void MapBgfxMapView::renderHud(const QSizeF &logical, const MapBgfx2d::Camera &c
     const MapRenderDiagnostics::Scope timing(MapRenderDiagnostics::Counter::BgfxHud);
     if (!this->hud_gpu.ready())
         return;
-#ifdef Q_OS_WASM
-    const qreal ratio = this->host->mapViewDevicePixelRatio();
-    const QScreen *hud_screen = this->host->mapViewScreen();
-#else
-    const qreal ratio = this->native_window->devicePixelRatio();
-    const QScreen *hud_screen = this->native_window->screen();
-#endif
+    const qreal ratio = viewDevicePixelRatio();
+    const QScreen *hud_screen = viewScreen();
     this->hud_text_cache.setDevicePixelRatio(ratio);
     if (hud_screen != nullptr)
         this->hud_text_cache.setLogicalDpi(hud_screen->logicalDotsPerInch());
@@ -2173,6 +2187,12 @@ void MapBgfxMapView::renderHud(const QSizeF &logical, const MapBgfx2d::Camera &c
 
 void MapBgfxMapView::handleHostShown()
 {
+    // Host context: the host's next render pass initializes and draws.
+    if (this->render_target == RenderTarget::HostContext)
+    {
+        requestRedraw();
+        return;
+    }
     if (this->initialized) {
         synchronizeGeometry();
         startFrameLoop();
@@ -2274,13 +2294,8 @@ void MapBgfxMapView::handleHostResized()
 
 QSize MapBgfxMapView::physicalSize() const
 {
-#ifdef Q_OS_WASM
-    const QSize logical = this->host->mapViewLogicalSize();
-    const qreal ratio = this->host->mapViewDevicePixelRatio();
-#else
-    const QSize logical = this->native_window->size();
-    const qreal ratio = this->native_window->devicePixelRatio();
-#endif
+    const QSize logical = viewLogicalPixels();
+    const qreal ratio = viewDevicePixelRatio();
     return QSize(std::max(1, qRound(logical.width() * ratio)),
                  std::max(1, qRound(logical.height() * ratio)));
 }
@@ -2293,12 +2308,37 @@ QSize MapBgfxMapView::physicalSize() const
 // physical framebuffer size is still used for the view rectangle.
 QSizeF MapBgfxMapView::logicalSize() const
 {
-#ifdef Q_OS_WASM
-    const QSize logical = this->host->mapViewLogicalSize();
-#else
-    const QSize logical = this->native_window->size();
-#endif
+    const QSize logical = viewLogicalPixels();
     return QSizeF(std::max(1, logical.width()), std::max(1, logical.height()));
+}
+
+// The native window when the view renders into its own (desktop), else the
+// host's area (WASM canvas, host context).
+QSize MapBgfxMapView::viewLogicalPixels() const
+{
+#ifndef Q_OS_WASM
+    if (this->native_window != nullptr)
+        return this->native_window->size();
+#endif
+    return this->host->mapViewLogicalSize();
+}
+
+qreal MapBgfxMapView::viewDevicePixelRatio() const
+{
+#ifndef Q_OS_WASM
+    if (this->native_window != nullptr)
+        return this->native_window->devicePixelRatio();
+#endif
+    return this->host->mapViewDevicePixelRatio();
+}
+
+QScreen *MapBgfxMapView::viewScreen() const
+{
+#ifndef Q_OS_WASM
+    if (this->native_window != nullptr)
+        return this->native_window->screen();
+#endif
+    return this->host->mapViewScreen();
 }
 
 double MapBgfxMapView::refreshPeriodSeconds() const
@@ -2318,6 +2358,12 @@ double MapBgfxMapView::refreshPeriodSeconds() const
 
 void MapBgfxMapView::startFrameLoop()
 {
+    // Host context: the host's render passes are the frame loop.
+    if (this->render_target == RenderTarget::HostContext)
+    {
+        requestRedraw();
+        return;
+    }
     if (this->frame_loop_running || !this->initialized || this->failed)
         return;
     this->frame_loop_running = true;
@@ -2389,6 +2435,20 @@ void MapBgfxMapView::synchronizeGeometry()
 #endif
     if (!this->initialized)
         return;
+    if (this->render_target == RenderTarget::HostContext)
+    {
+        // The host resizes its own framebuffer; bgfx only learns the new
+        // back-buffer size (GL viewport origin). No swap, no vsync.
+        const QSize host_pixels = physicalSize();
+        if (host_pixels == this->last_physical_size)
+            return;
+        this->last_physical_size = host_pixels;
+        const bgfx::SwapChain host_chain = BgfxNativeSurface::resizeSwapChain(
+            static_cast<std::uint32_t>(host_pixels.width()),
+            static_cast<std::uint32_t>(host_pixels.height()));
+        bgfx::reset(BGFX_RESET_NONE, &host_chain);
+        return;
+    }
 #ifndef Q_OS_WASM
     // Tab changes unmap the embedded QWindow. Do not reset a Vulkan/GL
     // swapchain until the native window is exposed again; Qt may resize it
@@ -2496,74 +2556,174 @@ bool MapBgfxMapView::initializeBackend()
                            ? "automatic selection" : bgfx::getRendererName(attempt));
             continue;
         }
-        const bgfx::RendererType::Enum selected = bgfx::getRendererType();
-        if (!MapBgfxBackend::shadersAvailable(selected))
-        {
-            qWarning() << "bgfx selected" << bgfx::getRendererName(selected)
-                       << "but this build has no shaders for it; trying the next renderer";
-            BgfxDeviceManager::shared().shutdown(this);
+        if (!adoptInitializedDevice())
             continue;
-        }
-        const BgfxFrameCoordinator::ViewRange views =
-            BgfxDeviceManager::shared().frames().reserve(this, kMapBgfxViewCount);
-        if (!views.valid())
-        {
-            qWarning() << "bgfx map could not reserve its rendering views";
-            BgfxDeviceManager::shared().shutdown(this);
-            continue;
-        }
-        this->map_view_id = views.at(0);
-        // Keep the existing native window on bgfx's default swapchain.
-        // Secondary-window framebuffer ownership is deliberately separate.
-        if (!BgfxDeviceManager::shared().targets().attachDefault(this, this->map_view_id))
-        {
-            qWarning() << "bgfx map could not attach the default render target";
-            BgfxDeviceManager::shared().shutdown(this);
-            continue;
-        }
-        this->globe_surface->setHeatmapBakeFirstView(views.at(1));
-        this->initialized = true;
-        this->startup_step = "creating shaders and GPU resources";
-        // Each part reports what it rejected; name the part here as well.
-        // The network's colours (entity data textures) for both views.
-        const bool network_ready = this->entity_style.initialize()
-            && this->gpu_2d_scene.initialize(mapIconAtlasImage());
-        const bool imagery_ready = network_ready && this->imagery_gpu.initialize();
-        const bool hud_ready = imagery_ready && this->hud_gpu.initialize()
-            && this->overlay_gpu.initialize() && this->label_gpu.initialize();
-        // The globe is optional: without it (editor, or its GPU setup failed)
-        // the 2D map works as before and the HUD offers no 3D.
-        this->globe_ready = network_ready && imagery_ready && hud_ready
-            && this->globe_offered && this->globe_surface->initialize();
-        // The network on the globe: without it the terrain still works.
-        this->globe_network_ready = this->globe_ready && this->globe_network.initialize();
-        if (!network_ready || !imagery_ready || !hud_ready)
-        {
-            const bgfx::Caps *caps = bgfx::getCaps();
-            qWarning() << "bgfx map shader initialization failed on"
-                       << bgfx::getRendererName(selected) << "in"
-                       << (!network_ready ? "network" : !imagery_ready ? "imagery" : "HUD")
-                       << "- max texture size" << (caps != nullptr ? int(caps->limits.maxTextureSize) : -1)
-                       << "RGBA8 caps" << Qt::hex
-                       << (caps != nullptr ? int(caps->formats[bgfx::TextureFormat::RGBA8]) : -1);
-            releaseGpuResources();
-            BgfxDeviceManager::shared().shutdown(this);
-            this->initialized = false;
-            continue;
-        }
-        this->startup_step = "running";
-        MapRenderDiagnostics::add(MapRenderDiagnostics::Counter::BgfxDeviceStarted);
-        qInfo() << "Map Monitor renderer:" << graphicsApiName();
-        // bgfx's text overlay covers the HUD; diagnostics only on request.
-        bgfx::setDebug(this->debug_overlay_enabled ? BGFX_DEBUG_TEXT : BGFX_DEBUG_NONE);
-        synchronizeGeometry();
-        // Already in Globe mode (device restart): the camera height resumes,
-        // the heatmap is baked again.
-        syncGlobeCameraHeight(true);
-        syncGlobeHeatmap();
         return true;
     }
     return false;
+}
+
+// After a successful bgfx::init(): the renderer has shaders in this build,
+// the map's views and default target are reserved, and every GPU part is
+// created. On false the device is shut down again (the caller may try the
+// next renderer).
+bool MapBgfxMapView::adoptInitializedDevice()
+{
+    const bgfx::RendererType::Enum selected = bgfx::getRendererType();
+    if (!MapBgfxBackend::shadersAvailable(selected))
+    {
+        qWarning() << "bgfx selected" << bgfx::getRendererName(selected)
+                   << "but this build has no shaders for it; trying the next renderer";
+        BgfxDeviceManager::shared().shutdown(this);
+        return false;
+    }
+    const BgfxFrameCoordinator::ViewRange views =
+        BgfxDeviceManager::shared().frames().reserve(this, kMapBgfxViewCount);
+    if (!views.valid())
+    {
+        qWarning() << "bgfx map could not reserve its rendering views";
+        BgfxDeviceManager::shared().shutdown(this);
+        return false;
+    }
+    this->map_view_id = views.at(0);
+    // Keep the existing native window on bgfx's default swapchain.
+    // Secondary-window framebuffer ownership is deliberately separate.
+    if (!BgfxDeviceManager::shared().targets().attachDefault(this, this->map_view_id))
+    {
+        qWarning() << "bgfx map could not attach the default render target";
+        BgfxDeviceManager::shared().shutdown(this);
+        return false;
+    }
+    this->globe_surface->setHeatmapBakeFirstView(views.at(1));
+    this->initialized = true;
+    this->startup_step = "creating shaders and GPU resources";
+    // Each part reports what it rejected; name the part here as well.
+    // The network's colours (entity data textures) for both views.
+    const bool network_ready = this->entity_style.initialize()
+        && this->gpu_2d_scene.initialize(mapIconAtlasImage());
+    const bool imagery_ready = network_ready && this->imagery_gpu.initialize();
+    const bool hud_ready = imagery_ready && this->hud_gpu.initialize()
+        && this->overlay_gpu.initialize() && this->label_gpu.initialize();
+    // The globe is optional: without it (editor, or its GPU setup failed)
+    // the 2D map works as before and the HUD offers no 3D.
+    this->globe_ready = network_ready && imagery_ready && hud_ready
+        && this->globe_offered && this->globe_surface->initialize();
+    // The network on the globe: without it the terrain still works.
+    this->globe_network_ready = this->globe_ready && this->globe_network.initialize();
+    if (!network_ready || !imagery_ready || !hud_ready)
+    {
+        const bgfx::Caps *caps = bgfx::getCaps();
+        qWarning() << "bgfx map shader initialization failed on"
+                   << bgfx::getRendererName(selected) << "in"
+                   << (!network_ready ? "network" : !imagery_ready ? "imagery" : "HUD")
+                   << "- max texture size" << (caps != nullptr ? int(caps->limits.maxTextureSize) : -1)
+                   << "RGBA8 caps" << Qt::hex
+                   << (caps != nullptr ? int(caps->formats[bgfx::TextureFormat::RGBA8]) : -1);
+        releaseGpuResources();
+        BgfxDeviceManager::shared().shutdown(this);
+        this->initialized = false;
+        return false;
+    }
+    this->startup_step = "running";
+    MapRenderDiagnostics::add(MapRenderDiagnostics::Counter::BgfxDeviceStarted);
+    qInfo() << "Map Monitor renderer:" << graphicsApiName();
+    // bgfx's text overlay covers the HUD; diagnostics only on request.
+    bgfx::setDebug(this->debug_overlay_enabled ? BGFX_DEBUG_TEXT : BGFX_DEBUG_NONE);
+    synchronizeGeometry();
+    // Already in Globe mode (device restart): the camera height resumes,
+    // the heatmap is baked again.
+    syncGlobeCameraHeight(true);
+    syncGlobeHeatmap();
+    return true;
+}
+
+// --- Host context (Qt Quick scene graph) ----------------------------------------
+
+bool MapBgfxMapView::initializeHostContext(const HostContext &context)
+{
+    this->initialization_attempted = true;
+    if (context.native_context == nullptr)
+    {
+        fail(QStringLiteral("bgfx map: the host has no native graphics context"));
+        return false;
+    }
+    this->device_busy = false;
+    if (!BgfxDeviceManager::shared().prepareFor(this))
+    {
+        qInfo() << "bgfx map: the device is in use by another visible map; waiting";
+        this->device_busy = true;
+        return false;
+    }
+    bgfx::Init settings{};
+    settings.limits.maxTransientVbSize = kTransientVertexBytes;
+    settings.limits.maxTransientIbSize = kTransientIndexBytes;
+    settings.type = context.opengl_es ? bgfx::RendererType::OpenGLES : bgfx::RendererType::OpenGL;
+    // bgfx adopts the host's current context: no window handle, no
+    // swapchain, no swap (frames are flushed, the host presents).
+    settings.platformData.context = context.native_context;
+    const QSize pixels = physicalSize();
+    settings.swapChain.width = static_cast<uint32_t>(pixels.width());
+    settings.swapChain.height = static_cast<uint32_t>(pixels.height());
+    settings.reset = BGFX_RESET_NONE;
+    this->startup_step = "bgfx::init() in the host context";
+    qInfo() << "bgfx map: bgfx::init() in the host's"
+            << (context.opengl_es ? "OpenGL ES" : "OpenGL") << "context at" << pixels;
+    if (!BgfxDeviceManager::shared().initialize(
+            this, settings,
+            [this]() { return this->host->mapViewVisible(); },
+            [this]() { shutdownBackend(); }))
+    {
+        fail(QStringLiteral("bgfx could not initialize in the host's graphics context"));
+        return false;
+    }
+    this->last_physical_size = pixels;
+    if (!adoptInitializedDevice())
+    {
+        fail(QStringLiteral("bgfx map GPU resources could not be created in the host's graphics context"));
+        return false;
+    }
+    this->frame_loop_running = true;
+    this->presented_valid = false;
+    this->frame_pacer.reset();
+    this->frame_clock.invalidate();
+    return true;
+}
+
+bool MapBgfxMapView::renderHostFrame(const HostContext &context)
+{
+    if (this->render_target != RenderTarget::HostContext || this->failed
+        || !this->host->mapViewVisible())
+        return false;
+    if (!this->initialized && !initializeHostContext(context))
+        return false;
+    double elapsed_seconds = 0.0;
+    if (this->frame_clock.isValid())
+        elapsed_seconds = this->frame_pacer.advance(
+            double(this->frame_clock.nsecsElapsed()) * 1e-9, 0.0);
+    this->frame_clock.start();
+    // The host cleared its framebuffer for this pass: every host frame
+    // draws the whole map, never an on-demand skip.
+    this->redraw_requested = true;
+    const quint64 frames_before = this->frame_count;
+    renderFrameAt(elapsed_seconds);
+    // Animations, budgeted uploads and terrain follow continue frame by
+    // frame; anything else asks again through requestRedraw().
+    if (this->initialized && (this->redraw_requested || this->frame_animating
+                              || this->terrain_navigation.following()))
+        emit hostFrameRequested();
+    return this->frame_count != frames_before;
+}
+
+void MapBgfxMapView::releaseHostContext()
+{
+    if (this->render_target != RenderTarget::HostContext)
+        return;
+    shutdownBackend();
+    // A new host context initializes again on the next render pass.
+    this->reinitialize_on_surface = false;
+    this->initialization_attempted = false;
+    this->presented_valid = false;
+    this->last_physical_size = QSize();
 }
 
 void MapBgfxMapView::renderFrame()
@@ -2675,6 +2835,7 @@ void MapBgfxMapView::renderFrameAt(double elapsed_seconds)
         || (globe_shown && this->globe_pending)
         || (this->distribution_network_visible && this->label_settings.anyEnabled()
             && this->labels_dirty);
+    this->frame_animating = animating;
 #if defined(Q_OS_LINUX) && !defined(Q_OS_WASM)
     const bool probe_animating = (this->multi_view_probe_attached
         && this->multi_view_probe_window != nullptr
@@ -2853,7 +3014,10 @@ void MapBgfxMapView::renderFrameAt(double elapsed_seconds)
         else
 #endif
         {
-            submitted = BgfxDeviceManager::shared().frames().present(this);
+            // Host context: execute without a swap; the host presents.
+            submitted = this->render_target == RenderTarget::HostContext
+                ? BgfxDeviceManager::shared().frames().flush(this)
+                : BgfxDeviceManager::shared().frames().present(this);
         }
     }
     if (!submitted)
@@ -2872,6 +3036,8 @@ void MapBgfxMapView::renderFrameAt(double elapsed_seconds)
         qInfo() << "bgfx map: first frame presented";
         emit signalRendererReady();
 #if defined(Q_OS_LINUX) && !defined(Q_OS_WASM)
+        if (this->native_window == nullptr)
+            return;
         if (qEnvironmentVariableIntValue("AOWIS_BGFX_THREE_VIEW_PROBE") != 0)
             QTimer::singleShot(0, this, [this]() { startThreeViewProbe(); });
         else if (qEnvironmentVariableIntValue("AOWIS_BGFX_TWO_VIEW_PROBE") != 0)

@@ -143,10 +143,61 @@ void testHiddenHostNeverInitializes()
 }
 }
 
+// Host context (Qt Quick): no window of its own, the host's area, every
+// change asks the host for a render pass, and a missing context fails once.
+void testHostContext()
+{
+    MapModel model;
+    FakeHost host;
+    host.visible = true;
+    MapBgfxMapView view(&model, &host, MapBgfxMapView::RenderTarget::HostContext);
+    expectTrue(view.renderTarget() == MapBgfxMapView::RenderTarget::HostContext,
+               "the view keeps its render target");
+    expectTrue(view.nativeInputWindow() == nullptr, "a host-context view creates no window");
+
+    int requests = 0;
+    QObject::connect(&view, &MapBgfxMapView::hostFrameRequested, [&requests]() { ++requests; });
+    view.requestRedraw();
+    expectTrue(requests == 1, "requestRedraw() asks the host for a render pass");
+    view.handleHostShown();
+    expectTrue(requests == 2, "showing the host asks for a render pass");
+    const int before_camera = requests;
+    model.setCenter(8.5, 47.4, QSize(320, 200));
+    model.setView2dContinuousZoom(12.0, QSize(320, 200));
+    expectTrue(requests > before_camera, "camera changes on the model ask for a render pass");
+
+    view.setMapCursor(Qt::PointingHandCursor);
+    expectTrue(host.cursor == Qt::PointingHandCursor, "without a window the host sets the cursor");
+
+    QString failure;
+    QObject::connect(&view, &MapBgfxMapView::signalRendererFailed,
+                     [&failure](const QString &reason) { failure = reason; });
+    expectTrue(!view.renderHostFrame(MapBgfxMapView::HostContext()),
+               "no native context, no frame");
+    expectTrue(!failure.isEmpty(), "a missing host context is reported");
+    expectTrue(view.startupDiagnostics().startsWith(QStringLiteral("failed")),
+               "the failure shows in the diagnostics");
+    expectTrue(!view.renderHostFrame(MapBgfxMapView::HostContext()), "a failed view stays failed");
+    view.releaseHostContext();
+    expectTrue(view.graphicsApiName() == QStringLiteral("bgfx (not initialized)"),
+               "releasing an uninitialized host context is harmless");
+
+    // A hidden host is never drawn, whatever the context.
+    MapBgfxMapView hidden_view(&model, &host, MapBgfxMapView::RenderTarget::HostContext);
+    host.visible = false;
+    int dummy = 0;
+    MapBgfxMapView::HostContext context;
+    context.native_context = &dummy;
+    expectTrue(!hidden_view.renderHostFrame(context), "a hidden host gets no frame");
+    expectTrue(hidden_view.graphicsApiName() == QStringLiteral("bgfx (not initialized)"),
+               "a hidden host never initializes bgfx");
+}
+
 int main(int argc, char **argv)
 {
     QGuiApplication application(argc, argv);
     testHiddenHostNeverInitializes();
+    testHostContext();
     std::printf("map_bgfx_map_view: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
