@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <cmath>
+#include <algorithm>
 #include <functional>
 
 namespace
@@ -102,7 +103,26 @@ void testFixedEyeCamera()
         expectTrue((ray.direction - pose.orientation.rotatedVector(QVector3D(0, 0, -1))).length()
                    < 0.0001f, "screen faces along the device back axis");
     }
+    const QQuaternion before_zoom = model.globeEyePose()->orientation;
+    for (double steps : {1.0, -2.0, 100.0, -100.0})
+    {
+        const double before_scale = model.globeEyePose()->magnification;
+        model.zoomGlobeEyeBy(steps);
+        const MapGlobeEyePose &zoomed = *model.globeEyePose();
+        expectTrue(zoomed.eye.x == pose.eye.x && zoomed.eye.y == pose.eye.y && zoomed.eye.z == pose.eye.z
+                   && zoomed.orientation == before_zoom, "zoom preserves the exact camera pose");
+        const double scale = std::clamp(before_scale * std::exp2(steps), 0.5, 8.0);
+        camera.syncFromMapModel(model);
+        MapGlobeScreenRay ray;
+        camera.screenRay(QPointF(600, 200), &ray);
+        const QVector3D local = before_zoom.conjugated().rotatedVector(ray.direction);
+        const double expected = std::tan(MapModel::GlobeFieldOfViewDeg * std::acos(-1.0) / 360.0) / scale;
+        expectTrue(std::abs(local.x() / -local.z() - expected) < 0.00001, "ray uses optical zoom");
+        const QVector3D projected = camera.viewProjectionMatrixForOrigin(pose.eye).map(ray.direction * 100000.0f);
+        expectTrue(std::abs(projected.x() - 0.5f) < 0.0001f, "zoomed projection agrees with picking");
+    }
     model.setGlobeEyePose(std::nullopt);
+    expectTrue(model.globeFieldOfViewDeg() == MapModel::GlobeFieldOfViewDeg, "orbit resumes at default FOV");
     camera.syncFromMapModel(model);
     MapGlobeScreenRay restored;
     camera.screenRay(QPointF(400, 200), &restored);

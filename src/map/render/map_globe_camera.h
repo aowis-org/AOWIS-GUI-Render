@@ -49,6 +49,7 @@ public:
 
 private:
     std::optional<MapGlobeEyePose> eye_pose;
+    double field_of_view_deg = 45.0;
     QSize viewport_size;
     double target_lon_deg = 0.0;
     double target_lat_deg = 0.0;

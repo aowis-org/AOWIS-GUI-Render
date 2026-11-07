@@ -134,7 +134,7 @@ void MapBgfxGlobeSurface::drawSky(bgfx::ViewId view, const MapGlobeCameraBasis &
     // View rays: forward (up x right, the lookAt basis) plus the screen's
     // half-extents along right and up (vertical FOV, aspect ratio).
     const QVector3D forward = QVector3D::crossProduct(basis.up, basis.right).normalized();
-    const double tan_half_height = std::tan(qDegreesToRadians(MapModel::GlobeFieldOfViewDeg * 0.5));
+    const double tan_half_height = std::tan(qDegreesToRadians(this->map_model->globeFieldOfViewDeg() * 0.5));
     const double aspect = double(std::max(1, logical_viewport.width()))
         / double(std::max(1, logical_viewport.height()));
     const QVector3D right = basis.right.normalized() * float(tan_half_height * aspect);

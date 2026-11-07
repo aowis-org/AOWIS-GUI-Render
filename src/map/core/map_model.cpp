@@ -479,6 +479,27 @@ void MapModel::panByPixels(const QPoint &delta, const QSize &viewport)
         viewport);
 }
 
+double MapModel::globeFieldOfViewDeg() const
+{
+    if (!this->m_eye_pose)
+        return GlobeFieldOfViewDeg;
+    const double tangent = std::tan(qDegreesToRadians(GlobeFieldOfViewDeg * 0.5));
+    return 2.0 * qRadiansToDegrees(std::atan(tangent / this->m_eye_pose->magnification));
+}
+
+void MapModel::zoomGlobeEyeBy(double steps)
+{
+    if (!this->m_eye_pose || !std::isfinite(steps))
+        return;
+    MapGlobeEyePose pose = *this->m_eye_pose;
+    const double scale = std::clamp(pose.magnification * std::exp2(steps), 0.5, 8.0);
+    if (scale != pose.magnification)
+    {
+        pose.magnification = scale;
+        setGlobeEyePose(pose);
+    }
+}
+
 void MapModel::setGlobeEyePose(const std::optional<MapGlobeEyePose> &pose)
 {
     this->m_eye_pose = pose;
@@ -501,7 +522,7 @@ bool MapModel::globeScreenRay(
     parameters.distance_m = qMax(MinViewGlobeDistanceM, this->m_view_globe_distance_m);
     parameters.target_height_m = this->m_view_globe_vertical_offset_m;
     parameters.collision_lift_m = this->m_view_globe_camera_collision_lift_m;
-    parameters.field_of_view_deg = GlobeFieldOfViewDeg;
+    parameters.field_of_view_deg = globeFieldOfViewDeg();
     return mapGlobeBuildScreenRay(screen_position, viewport, parameters, ray);
 }
 

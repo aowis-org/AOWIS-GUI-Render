@@ -15,6 +15,7 @@ struct MapGlobeEyePose
 {
     GeoWgs84Ellipsoid::EcefPositionD eye;
     QQuaternion orientation;
+    double magnification = 1.0;
 };
 
 struct MapGlobeScreenRayParameters

@@ -486,7 +486,7 @@ QVector<MapGlobeQuadtreeLeaf> MapGlobeSurfaceScene::selectVisibleLeaves(
     }
     const double viewport_height_px = double(qMax(1, viewport_size.height()));
     const double half_fov_rad = qDegreesToRadians(
-        MapModel::GlobeFieldOfViewDeg * 0.5);
+        map_model.globeFieldOfViewDeg() * 0.5);
     const double tan_half_fov = std::tan(half_fov_rad);
     // The view cone must contain the whole frustum, i.e. its corners. The
     // vertical half FOV alone culled visible terrain at the left and right

@@ -66,6 +66,7 @@ void MapGlobeCamera::syncFromMapModel(const MapModel &map_model)
 {
     const MapCameraViewState view = map_model.cameraViewState();
     this->eye_pose = map_model.globeEyePose();
+    this->field_of_view_deg = map_model.globeFieldOfViewDeg();
     this->target_lon_deg = view.center_lon_deg;
     this->target_lat_deg = view.center_lat_deg;
     this->yaw_deg = view.globe_yaw_deg;
@@ -103,7 +104,7 @@ void MapGlobeCamera::updateRenderOrigin()
         double(qMax(1, this->viewport_size.height()));
     const double meters_per_pixel =
         2.0 * distance_m
-        * std::tan(qDegreesToRadians(MapModel::GlobeFieldOfViewDeg * 0.5))
+        * std::tan(qDegreesToRadians(this->field_of_view_deg * 0.5))
         / viewport_height_px;
     const double precision_scaled_threshold_m =
         meters_per_pixel * GlobeRenderOriginPrecisionBudgetPx
@@ -148,7 +149,7 @@ QMatrix4x4 MapGlobeCamera::viewProjectionMatrixForOrigin(
 
     QMatrix4x4 projection;
     projection.perspective(
-        float(MapModel::GlobeFieldOfViewDeg),
+        float(this->field_of_view_deg),
         float(viewport_width) / float(viewport_height),
         float(near_plane_m), float(far_plane_m));
 
@@ -204,7 +205,7 @@ bool MapGlobeCamera::screenRay(
     parameters.distance_m = orbitDistanceM();
     parameters.target_height_m = this->vertical_offset_m;
     parameters.collision_lift_m = this->camera_collision_lift_m;
-    parameters.field_of_view_deg = MapModel::GlobeFieldOfViewDeg;
+    parameters.field_of_view_deg = this->field_of_view_deg;
 
     return mapGlobeBuildScreenRay(
         screen_position, this->viewport_size, parameters, ray);

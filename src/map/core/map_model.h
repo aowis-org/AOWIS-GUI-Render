@@ -117,6 +117,8 @@ public:
 
     MapCameraViewState cameraViewState() const;
     const std::optional<MapGlobeEyePose> &globeEyePose() const { return this->m_eye_pose; }
+    double globeFieldOfViewDeg() const;
+    void zoomGlobeEyeBy(double steps);
     void setGlobeEyePose(const std::optional<MapGlobeEyePose> &pose);
     // The one 2D camera zoom (Web Mercator level, MinZoom..MaxZoom, any
     // fraction). There is no integer zoom state: the imagery tile level is
