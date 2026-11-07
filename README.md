@@ -1,17 +1,22 @@
 # AOWIS-GUI-Render
 
-Shared map-rendering code for AOWIS. This is an **independently buildable
-repository**, consumed as a pinned Git submodule by the desktop GUI. It provides
-production 2D network and 3D globe GPU components, geometry, and the shared
-bgfx device lifecycle. It is **not yet a complete, host-independent map engine**:
-terrain preparation, network and imagery repositories, and frame orchestration
-still have desktop-GUI owners.
+The AOWIS map engine. It draws the 2D map and the 3D terrain globe, with
+imagery, terrain, the hydraulic network, labels, the native HUD and picking.
+It also loads tiles and terrain from aowis-server-map. Every source is
+backend-neutral C++20/Qt; the GPU side is bgfx.
 
-The planned consumers are `AOWIS-SERVER-GUI` (Qt Widgets, native Linux and
-WebAssembly) and `AOWIS-GUI-Mobile` (Qt Quick/Android). The Mobile renderer
-currently uses the shared low-level device/geometry contracts, **not** the
-production desktop globe scene. Mobile integration is deliberately deferred
-until the shared engine boundary is stable.
+It is an **independently buildable repository**, consumed as a pinned Git
+submodule (`external/AOWIS-GUI-Render`) by:
+
+| Host | Toolkit | How it hosts the map |
+| --- | --- | --- |
+| AOWIS-SERVER-GUI | Qt Widgets: native Linux/Windows/macOS, WebAssembly | `MapBgfxMapView` in its own native window (`RenderTarget::NativeWindow`), embedded by the GUI's `MapBgfxSurface` |
+| AOWIS-GUI-Mobile | Qt Quick: Android, Linux desktop | `MapBgfxMapView` inside Qt Quick's OpenGL / OpenGL ES scene graph (`RenderTarget::HostContext`), hosted by Mobile's `MobileMapView` item |
+
+Both hosts get the same map. A host supplies only what is toolkit- or
+application-specific: its window or graphics context, input, settings,
+assets and (GUI) the hydraulic network. Render never sees hydraulic data
+or application settings.
 
 ## Build on Linux
 
@@ -24,237 +29,119 @@ A fresh clone needs its pinned `bx`, `bimg`, `bgfx`, `GeographicLib` and
 ./compile_linux_tests.sh
 ```
 
-- `compile_linux.sh`: configure and build production libraries with Ninja;
-  **does not launch an application or run CTest**.
-- `compile_linux_tests.sh`: configure and build **all library and test targets
-  first**, then run CTest only after successful compilation and linking. A
-  failed build cannot produce a false pass from stale test executables.
-- Both accept `--debug` or `--release` (default). They use separate
-  `build-linux` and `build-linux-tests` directories.
-- `AOWIS_BUILD_JOBS=8` selects build parallelism; `AOWIS_LINUX_LINKER=lld`
-  (default) or `system` selects the linker. LLD must be installed for the
-  default configuration.
+- `compile_linux.sh` builds the libraries with Ninja (`build-linux`). It does
+  not run tests.
+- `compile_linux_tests.sh` builds **every library and test target first**
+  and runs CTest only after the build succeeded (`build-linux-tests`). A
+  failed build can never pass with stale test executables. It runs the
+  tests labelled `aowis`: a standalone build also registers GeographicLib's
+  own CTest entries for tools it never builds.
+- Both accept `--debug` or `--release` (default).
+- `AOWIS_BUILD_JOBS=8` sets the parallelism; `AOWIS_LINUX_LINKER=lld`
+  (default, LLD must be installed) or `system` selects the linker.
 
-Required: CMake 3.21+, Ninja, a C++20 toolchain, Qt 6 Core/Gui development
-packages, Python 3 (MODEL's schema generator), and the graphics dependencies
-of the selected bgfx backends.
-No shader tool download is needed for normal builds; compiled shader resources
-are included. For the geometry-only, no-Qt build configuration, see
-[Build and host integration](docs/host-integration.md).
+Requirements: CMake 3.21+, Ninja, a C++20 compiler, Qt 6 Core, Gui and
+Network, Python 3 (MODEL's schema generator) and the graphics development files of the
+selected bgfx renderers. On Linux, Qt's private Gui headers (Debian/Ubuntu
+`qt6-base-private-dev`) are needed for Wayland and X11 native windows; without
+them `BgfxQtNativeSurface` captures only the window ID. Compiled shaders are
+committed, so a normal build needs no shader compiler.
 
-Vendor gitlinks are registered once with
-`./tools/bootstrap_vendor_submodules.sh ../AOWIS-SERVER-GUI`, which copies the
-GUI's pinned revision of each dependency and leaves already registered ones
-alone (so it also adds dependencies introduced later, such as GeographicLib
-and MODEL). Ordinary clones and builds should **not** run that bootstrap
-step. No dependency is fetched during CMake configuration.
+No dependency is fetched during configuration. `tools/bootstrap_vendor_submodules.sh`
+registers missing vendor gitlinks from a GUI checkout
+(`./tools/bootstrap_vendor_submodules.sh ../AOWIS-SERVER-GUI`); ordinary clones
+and builds never run it.
 
-`compile_linux_tests.sh` runs the tests labelled `aowis` only: a standalone
-build also contains GeographicLib's own CTest entries for tools it never
-builds.
+## Libraries
 
-## Public CMake targets
+Each library is a CMake target with an `AOWIS_RENDER_BUILD_<NAME>` option.
+A host switches on what it uses; the defaults build everything.
 
-| Target | Runtime dependencies | Responsibility |
+| Target | Depends on | Contents |
 | --- | --- | --- |
-| `AOWIS::RenderGeometry` | C++20 only | Projections, camera helpers, icon index, terrain-height cache, imagery UV fallback, draw-plan contracts |
-| `AOWIS::RenderGeo` | Qt6 Gui, MODEL (`aowis/model/gis.h`), GeographicLib (private) | WGS84 ellipsoid/ECEF, orbit camera basis, screen rays, Web Mercator tile math, UTM and project-local metric coordinates |
-| `AOWIS::RenderView` | Qt6 Gui, RenderGeo | `MapModel` (2D continuous zoom, globe orbit rig, screen <-> WGS84, imagery tile addressing through the host's `MapImageryProviderDirectory`), camera view state, globe picking, render cache math, render diagnostics |
-| `AOWIS::RenderGlobeTerrain` | Qt6 Gui, RenderView, RenderTerrainData, RenderGlobe | Globe terrain CPU pipeline: quadtree selection/LOD, surface preparation, mesh scheduler, terrain navigation, globe camera, heatmap scene; tiles from the host's `MapTerrainTileSource` |
-| `AOWIS::RenderMapData` | Qt6 Gui, RenderView, RenderTerrainData | Imagery and DEM tile repositories (scheduling, caches, decode workers, WASM browser decoder, dataset catalog, cache deletion) over the `InterfaceServerMap` contract; the host supplies a `MapServerTransport` |
-| `AOWIS::RenderGlobeNetwork` | Qt6 Gui, RenderGlobeTerrain, RenderNetwork, GeographicLib (private) | Network render contract (snapshot, symbology settings and ramps, entity kinds) and the globe network CPU side: retained globe network scene, render frame, icon atlas, resolved symbology data |
-| `AOWIS::RenderMap` | RenderCore, RenderGlobeNetwork, RenderMapData | bgfx map renderers: GPU network colouring, globe network and terrain surfaces, 2D symbology / picking, labels, native HUD (layout, input, legend) |
-| `AOWIS::RenderTerrainData` | Qt6 Core | Normalized 65×65 DEM tile decoder (v1 format), tile keys/endpoints, terrain dataset catalog |
-| `AOWIS::RenderNetwork` | Qt6 Core, RenderGeometry | Production 2D network scene variants and CPU mesh staging |
-| `AOWIS::RenderGlobe` | Qt6 Gui, RenderGeometry | 3D network/model/flow/link/underground geometry, terrain topology, scene invalidation policy |
-| `AOWIS::RenderDevice` | bgfx and RenderGeometry | Device generation, client retirement, view/frame coordination and swapchains |
-| `AOWIS::RenderCore` | Qt6 Gui, bgfx, other Render targets | Production 2D and 3D GPU uploads/draws, texture atlases, buffers, shader resources and HUD cache |
+| `AOWIS::RenderGeometry` | C++20 only (header-only) | 2D projection, three-view camera, globe icon index, height cache, imagery ancestor UVs, globe draw plan |
+| `AOWIS::RenderGeo` | Qt Gui, MODEL (`aowis/model/gis.h`), GeographicLib (private) | WGS84 ellipsoid and ECEF, orbit camera basis, screen rays, Web Mercator tiles, UTM and project-local metric coordinates (`src/geo/`) |
+| `AOWIS::RenderTerrainData` | Qt Core | 65×65 DEM tile decoder, tile keys and endpoints, terrain dataset catalog |
+| `AOWIS::RenderView` | Qt Gui, RenderGeo | `MapModel` (continuous 2D zoom, globe orbit rig, screen ↔ WGS84, imagery tile addressing), camera view state, globe picking, render cache math, render diagnostics |
+| `AOWIS::RenderMapData` | Qt Gui, RenderView, RenderTerrainData | `MapTileRepository` and `MapTerrainRepository`: request scheduling, caches, decode workers, browser decoder (WASM), dataset catalog, cache deletion; the transport contract `InterfaceServerMap` / `MapServerTransport` |
+| `AOWIS::RenderMapRest` | Qt Network, RenderMapData | aowis-server-map client: `RESTClient`, `InterfaceServerMapREST`, `MapProviderCatalog` and fallback resolution, configured by `MapServerRestConfiguration` |
+| `AOWIS::RenderNetwork` | Qt Core, RenderGeometry | 2D network scene, its two presentation variants and CPU mesh staging |
+| `AOWIS::RenderGlobe` | Qt Gui, RenderGeometry | Globe network geometry: links, flow chevrons, underground runs, tank and reservoir models, terrain tile topology, scene invalidation policy |
+| `AOWIS::RenderGlobeTerrain` | Qt Gui, RenderView, RenderTerrainData, RenderGlobe | Globe terrain pipeline: quadtree selection and LOD, surface preparation, terrain mesh scheduler, terrain-aware navigation, globe camera, heatmap scene |
+| `AOWIS::RenderGlobeNetwork` | Qt Gui, RenderGlobeTerrain, RenderNetwork, GeographicLib (private) | Network render contract (snapshot, symbology settings and ramps, entity kinds), retained globe network scene, render frame, icon atlas |
+| `AOWIS::RenderDevice` | bgfx, RenderGeometry (no Qt) | The process's single bgfx device, frame coordinator, native target registry and the native surface descriptor |
+| `AOWIS::RenderCore` | Qt Gui, RenderDevice, RenderNetwork, RenderGlobe | 2D and globe GPU uploads and draws, imagery atlases, terrain buffers and index pools, sky and heatmap GPU, HUD text cache, embedded shaders |
+| `AOWIS::RenderQtSurface` | Qt Gui (GuiPrivate optional), RenderDevice | `BgfxQtNativeSurface`: a `QWindow`'s native window and display handles (X11, Wayland, Windows, macOS) |
+| `AOWIS::RenderMap` | RenderCore, RenderGlobeNetwork, RenderGlobeTerrain, RenderMapData, RenderQtSurface | The map: `MapBgfxMapView` with its renderers (2D symbology and picking, globe network and surface, labels, HUD) |
 
-`RenderCore` requires the device, 2D scene and globe targets. Render may build
-its own pinned bgfx target, or a parent can supply **one existing `bgfx`
-CMake target**. It must never create a second bgfx runtime in the process.
-GeographicLib and MODEL follow the same rule: a host that added
-`GeographicLib_STATIC` / `AOWIS::Model` before Render keeps ownership, and
-Render's submodules are used only when those targets do not exist
-(`cmake/aowis_render_dependencies.cmake`).
-Normal GUI builds embed Render with `AOWIS_RENDER_BUILD_MAP_CORE=ON`.
+The host builds `MapBgfxMapView` and links `AOWIS::RenderMap`, plus
+`AOWIS::RenderMapRest` when it loads tiles from aowis-server-map.
 
-All committed shader families use the existing resource convention
-`:/aowis/map/bgfx/<family>/<shader>.bin`. `MapBgfxBackend` initializes the
-registered resources without source-level dependency on GUI resource files.
+Embedded shaders keep the resource paths
+`:/aowis/map/bgfx/<family>/<shader>.bin`; the families are glsl, essl,
+spirv, dx11 and metal, and only those of the configured renderers are
+embedded.
 
-## What Render currently owns
+## What a host provides
 
-**Geodesy and terrain data**
+- **A window or a context.** Native: the host embeds
+  `nativeInputWindow()` and forwards its show, hide, resize, key and focus
+  events. Host context: the host calls `renderHostFrame()` from its own render
+  pass with its context current.
+- **Settings and assets** through setters and providers: terrain detail,
+  tank/reservoir textures, HUD images, navigation keys, scale bar, globe HUD
+  state.
+- **Data sources:** a `MapServerTransport` for tiles and terrain (REST through
+  `AOWIS::RenderMapRest`, or the host's own, such as the GUI's in-process
+  Standalone server), a `MapImageryProviderDirectory` for `MapModel`
+  (normally `MapProviderCatalog`), and optionally a `NetworkRenderSnapshot`
+  with its `MapNetworkRenderSymbology`.
+- **Ownership of GeographicLib and MODEL.** If the host adds
+  `GeographicLib_STATIC` or `AOWIS::Model` before Render, Render uses the
+  host's targets; otherwise it builds its own submodules
+  (`cmake/aowis_render_dependencies.cmake`). The same holds for one existing
+  `bgfx` target. A process never contains a second bgfx runtime.
 
-- `GeoWgs84Ellipsoid`, `GeoWebMercator`, `GeoMetricProjection` (`src/geo/`).
-- `MapTerrainTile` decoding and `MapTerrainDatasetCatalog` parsing
-  (`src/map/data/`); requests, caching and transport stay with the host.
-
-**View state**
-
-- `MapModel` with `MapViewMode` / `MapProvider` (`map/core/map_view_types.h`).
-  Host services are injected: the provider catalog as a
-  `MapImageryProviderDirectory` (change notifications via
-  `providerCatalogChanged()` / `providerFallbackChanged()`), the orbit
-  sensitivity as a getter (`setOrbitSensitivitySource()`).
-
-**bgfx map renderers**
-
-- `MapBgfxEntityStyle`, `MapBgfxGlobeNetwork` (model textures from the host:
-  `setModelImages()`), `MapBgfxGlobeSurface` (detail setting from the host:
-  `setTerrainDetailReductionSource()`), 2D symbology / picking / snapshot
-  adapter, `MapBgfxLabels`, `MapBgfxHud`.
-- `MapBgfxMapView` (`map/bgfx/map_bgfx_map_view.h`): the map view that owns
-  them — frame loop, device lifecycle, native QWindow and its event routing,
-  picking, terrain queries, HUD. A `QObject`, no Qt Widgets. The host
-  implements `MapBgfxMapViewHost` (visibility, font, palette, focus; WASM:
-  size, ratio, cursor), embeds `nativeInputWindow()`, forwards its events
-  (`handleHostShown()`, `handleKeyPress()`, ...) and injects terrain
-  detail, model textures, HUD images, navigation keys, the scale bar and the
-  globe HUD state. Native handles come from `BgfxQtNativeSurface`
-  (`AOWIS::RenderQtSurface`) unless the host overrides the capture. The GUI's `MapBgfxSurface` is that host
-  for Qt Widgets.
-
-- `MapBgfxMapView::RenderTarget::HostContext`: the view renders inside a
-  graphics context the host owns and presents (Qt Quick's OpenGL / OpenGL ES
-  scene graph): `renderHostFrame()` from the host's render pass,
-  `releaseHostContext()` on scene-graph invalidation, `hostFrameRequested()`
-  to schedule a pass. Frames are flushed (`BGFX_FRAME_FLUSH`), never swapped.
-
-**Map server REST client** (`AOWIS::RenderMapRest`, Qt Network)
-
-- `RESTClient`, `InterfaceServerMapREST` (the map/terrain transport) and
-  `MapProviderCatalog` (the server's imagery providers, a
-  `MapImageryProviderDirectory`), configured by the host's
-  `MapServerRestConfiguration`; the host stores the user's provider
-  fallbacks.
-
-**Network render contract**
-
-- `network/network_render_snapshot.h`, `network/network_symbology*.h`,
-  `network/infrastructure_entity_traits.h`, `map/core/map_network_types.h`.
-  The host builds the snapshot and fills `MapNetworkRenderSymbology` from its
-  own model and results; Render never sees hydraulic data.
-- `MapGlobeNetworkScene`, `MapGlobeRenderFrame`, the icon atlas (drawn in
-  code, no host resources).
-
-**Map data**
-
-- `MapTileRepository`, `MapTerrainRepository` (`src/map/data/`) and the map
-  server transport contract `InterfaceServerMap` (`src/services/`). The host
-  creates the concrete transport (REST, in-process server) through
-  `MapServerTransport` and forwards provider-catalog changes to
-  `MapTileRepository::invalidateProviderCatalog()`.
-
-**Globe terrain pipeline**
-
-- `MapGlobeSurfaceScene`, `MapGlobeSurfacePreparation`,
-  `MapTerrainMeshScheduler`, `MapGlobeTerrainNavigation`, `MapGlobeCamera`,
-  `MapGlobeHeatmapScene`. Decoded tiles come from the host's
-  `MapTerrainTileSource`; the host forwards tile arrivals and injects the
-  terrain detail setting (`setTerrainDetailReductionSource()`).
-
-**Device and 2D**
-
-- Process-wide bgfx device/target management: `BgfxDeviceManager`,
-  `BgfxFrameCoordinator`, `BgfxNativeTargetRegistry`, `BgfxNativeSurface`
-  (Qt-free, `AOWIS::RenderDevice`).
-- `BgfxQtNativeSurface` (`AOWIS::RenderQtSurface`): QWindow -> native
-  handles (winId; Wayland/XCB display through Qt6::GuiPrivate when present),
-  for every Qt host's bgfx windows.
-- Web Mercator/camera math, 2D network scene/mesh and 2D GPU submission.
-- 2D imagery atlas/upload support, style-binding interface, HUD texture/text
-  cache and shader resources.
-
-**3D hydraulic network**
-
-- Tank/reservoir model geometry and tangent basis; curved globe-link ribbons,
-  flow chevrons and terrain-aware buried-run classification.
-- CPU stream invalidation decisions (`MapGlobeSceneSync`); GUI still retains
-  the authoritative scene snapshot and decides when to execute the plan.
-- Globe draw ordering and Solid/X-Ray/Hide submissions; the thirteen dynamic
-  vertex streams, optional icon-order index stream, shader/uniform/model
-  texture pools and the five production vertex layouts.
-
-**3D terrain and overlays**
-
-- Shared tile-grid indices, skirt geometry and index-buffer pool
-  (`MapGlobeTileTopology`, `MapBgfxGlobeTileIndexPool`).
-- Window/cap/wireframe GPU vertex buffers and range-only DEM patch uploads
-  (`MapBgfxGlobeTerrainBufferPool`).
-- Terrain/cap/wireframe GPU programs and draw submission
-  (`MapBgfxGlobeTerrainGpu`); sky and heatmap GPU resources/submissions
-  (`MapBgfxGlobeSkyGpu`, `MapBgfxGlobeHeatmapGpu`).
-- Shared geometry helpers for icon placement, height caching and imagery
-  ancestor-tile UV fallback. **These helpers are not yet the full terrain
-  preparation, tile-streaming, or imagery-provider pipeline.**
-
-For the data path, remaining GUI owners and exact future boundary, read
-[Map-engine ownership and data pipeline](docs/map-engine-boundary.md). For
-usage from a host, see [Build and host integration](docs/host-integration.md).
-
-## What stays with the GUI today
-
-The GUI's `MapBgfxSurface` hosts `MapBgfxMapView` in Qt Widgets and supplies
-its settings and assets. The GUI also owns `MapGlobeSurfaceScene` (quadtree/LOD),
-`MapGlobeSurfacePreparation`, `MapTerrainMeshScheduler`, decoded terrain and
-imagery repositories, provider configuration and upstream request adapters.
-The GUI supplies GeographicLib/geodesic sampling, height data, network
-snapshot/IDs, picking and editor interaction, and the Qt/native/WebAssembly
-surface adapters. Moving these classes verbatim would introduce app services
-and `AOWIS-SERVER-MODEL` dependencies into Render; their engine-neutral
-algorithms and their host adapters must be separated first.
-
-Backend-specific notes and renderer-owned versus host-owned resources are in
-[Host integration](docs/host-integration.md). The remaining **forward work**
-is in [Renderer roadmap](docs/roadmap.md); it is not a record of historic patch
-stages.
+The details are in [Host integration](docs/host-integration.md).
 
 ## Runtime contracts
 
-1. **Exactly one bgfx device per process.** A new view does not call
-   `bgfx::init()` again. Device generation tokens, reserved view IDs and
+1. **Exactly one bgfx device per process.** A new view never calls
+   `bgfx::init()` itself. Device generations, process-global view IDs and
    client retirement protect shared resources.
-2. **GPU calls run on the owning render thread.** GUI and Mobile use different
-   toolkit lifecycle adapters; Mobile's Qt Quick scene graph retains control
-   of presentation.
-3. **Retire resources before native surface/device teardown.** Each GPU pool
-   releases its handles on the owning render thread; a restarted device needs
-   newly allocated handles.
-4. **Keep a D24S8 depth attachment** for primary/secondary 3D swapchains.
-   Terrain skirts conceal LOD seams but must not overdraw foreground terrain.
-5. **Keep geometry identity and elevation data in the host's domain model.**
-   No private hydraulic elevation model or duplicate editor state is
-   introduced by the renderer.
-6. **Do not confuse compilation with runtime acceptance.** GPU mock tests
-   validate submission and cleanup, but OpenGL/Vulkan/WebGL/Android visual
-   behavior and native surface restoration still require device testing.
+2. **GPU calls run on the owning render thread**, the thread of the view and
+   its model. bgfx is built single-threaded. A Qt Quick host uses the basic
+   render loop.
+3. **Retire GPU resources before the native surface or the device goes
+   away.** A restarted device needs newly allocated handles.
+4. **3D swapchains have a D24S8 depth attachment.** Terrain skirts hide LOD
+   seams only because the depth test keeps them behind nearer ground.
+5. **Hydraulic identity and elevations stay in the host's model.** The
+   renderer keeps no hydraulic model of its own.
+6. **Compiling is not runtime acceptance.** Mock tests check submissions and
+   cleanup; OpenGL, Vulkan, WebGL and Android behaviour need device tests.
 
-## Verification and change workflow
+## Change workflow
 
-Render's test scripts validate production-source geometry and GPU code (with
-recording bgfx/Qt shims where appropriate), real-Qt library linkage, and
-shader resource registration. The desktop GUI's `./compile_linux_tests.sh`
-adds **full application compilation and linking before CTest**, so a failed
-GUI target cannot be hidden by green test binaries.
+`./tools/apply_patch.sh` applies changed-file ZIP patches
+(`aowis-gui-render-*.zip`, paths under `AOWIS-GUI-Render/`; files listed in
+`AOWIS-GUI-Render/.aowis-patch-delete.txt` are removed). For a change that
+spans Render and a host:
 
-For a two-repository change:
-
-1. Apply and build the Render patch; run its tests.
-2. Commit and push the **actual Render Git tree**, checking newly added
-   `.cpp` and `.h` files are tracked (a source ZIP alone is not a Git commit).
-3. Update GUI's pinned `external/AOWIS-GUI-Render` gitlink, apply its adapter
-   patch and run its full build-gated test script.
-4. Exercise affected map features and both native backends where possible;
-   only then commit the GUI integration.
-
-`./tools/apply_patch.sh` accepts changed-file ZIP patches. Keep patch ZIPs
-limited to modified or added files, with fresh timestamps and repository-root
-paths. No compiled build directories belong in Git.
+1. Apply the Render patch and run `./compile_linux_tests.sh`.
+2. Commit and push the **Render Git tree**; check that new `.cpp` and `.h`
+   files are tracked.
+3. In the host, update the `external/AOWIS-GUI-Render` gitlink
+   (`./git_submodule_update.sh --render`), apply the host patch and run the
+   host's build-gated tests.
+4. Exercise the affected map features on real GPUs before committing the host.
 
 ## Documentation
 
-- [Map-engine ownership and data pipeline](docs/map-engine-boundary.md)
-- [Host build, linking and GPU lifecycle](docs/host-integration.md)
-- [Remaining renderer roadmap and acceptance gates](docs/roadmap.md)
+- [Architecture and data pipeline](docs/architecture.md): what each part
+  owns, how a tile becomes a frame, and the correctness contracts.
+- [Renderer](docs/renderer.md): how the 2D map, the HUD, labels, imagery,
+  terrain and the globe network are drawn, renderer selection and shaders.
+- [Host integration](docs/host-integration.md): embedding the CMake project,
+  hosting `MapBgfxMapView` in both modes, GPU lifecycle rules, verification.
+- [Roadmap](docs/roadmap.md): remaining work and acceptance gates.
