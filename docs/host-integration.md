@@ -14,7 +14,7 @@ surfaces are available through a single engine object yet.
 | Shared geometry | `AOWIS::RenderGeometry`, plus production `RenderNetwork`/`RenderGlobe` used by GUI | Low-level geometry/device integration; production globe/terrain integration deferred |
 | GPU library | `AOWIS::RenderCore` | Production Map GPU core not yet integrated |
 | bgfx source | Host-supplied pinned bx/bimg/bgfx target via Render | Pinned bgfx.cmake target, supplied by Mobile |
-| Native surface | GUI `BgfxQtNativeSurface` adaptor | Qt Quick borrowed EGL context |
+| Native surface | Render `BgfxQtNativeSurface` (`AOWIS::RenderQtSurface`) | Qt Quick borrowed EGL context (`AOWIS::RenderQtSurface` available for native windows) |
 | Present | `BgfxFrameCoordinator` coordinates all registered native clients | Qt Quick owns swap; borrowed-context path uses `bgfx::frame(BGFX_FRAME_FLUSH)` |
 | Map view | `AOWIS::RenderMap` `MapBgfxMapView`, hosted by GUI `MapBgfxSurface` (`MapBgfxMapViewHost`) | Same view; Qt Quick host item to be written |
 
@@ -34,10 +34,11 @@ imagery, terrain, network, labels, HUD, picking and terrain queries. It is a
   `handleHostResized()`, `handleHostChange(type)`, `handleKeyPress()`,
   `handleKeyRelease()`, `handleFocusOut()`; keep focus on another receiver
   with `setNativeWindowAcceptsFocus(false)`;
-- inject `setNativeSurfaceCapture()` (Qt private native handles),
-  `setTerrainDetailReductionSource()`, `setGlobeModelImages()`,
+- inject `setTerrainDetailReductionSource()`, `setGlobeModelImages()`,
   `setHudImages()`, `setHudNavigationKeys()`, `setHudScaleProvider()` and
   `setGlobeHudStateProvider()`;
+- native handles default to `BgfxQtNativeSurface::capture()`;
+  `setNativeSurfaceCapture()` overrides it;
 - the WASM page provides `window.aowisBgfxMap` (the browser canvas bridge).
 
 The GUI pins Render at `external/AOWIS-GUI-Render`. To advance a GUI checkout
@@ -112,7 +113,7 @@ Do not introduce server/network or editor callbacks into GPU-only targets.
   IDs and batches submissions before one native `bgfx::frame()`.
 - Retire clients, GPU pools, view IDs and swapchains before the owning surface
   is destroyed. A stale device generation invalidates handles and view IDs.
-- `BgfxNativeSurface` is toolkit-neutral; GUI captures the native display,
+- `BgfxNativeSurface` is toolkit-neutral; `BgfxQtNativeSurface` captures the native display,
   window, type and physical size. A secondary target resizes independently;
   do not reset the whole device for an ordinary secondary resize.
 - Use D24S8 for 3D primary/secondary targets. Missing depth causes terrain

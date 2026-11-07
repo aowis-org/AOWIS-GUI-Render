@@ -678,6 +678,45 @@ if(AOWIS_RENDER_BUILD_MAP_CORE)
     endif()
 endif()
 
+# Qt hosting adapter for native handles: QWindow -> BgfxNativeSurface (winId(),
+# plus Qt's platform native interface for the Wayland/XCB display; that part
+# needs Qt6::GuiPrivate and is compiled out without it). Shared by every Qt
+# host and by MapBgfxMapView; RenderDevice stays Qt-free.
+option(AOWIS_RENDER_BUILD_QT_SURFACE
+    "Build the Qt native surface adapter (RenderDevice + Qt Gui)" ${AOWIS_RENDER_BUILD_MAP_CORE})
+if(AOWIS_RENDER_BUILD_QT_SURFACE AND NOT AOWIS_RENDER_BUILD_DEVICE)
+    message(FATAL_ERROR "AOWIS_RENDER_BUILD_QT_SURFACE requires AOWIS_RENDER_BUILD_DEVICE")
+endif()
+if(AOWIS_RENDER_BUILD_QT_SURFACE)
+    find_package(Qt6 REQUIRED COMPONENTS Gui OPTIONAL_COMPONENTS GuiPrivate)
+    add_library(aowis-render-qt-surface STATIC
+        src/map/bgfx/bgfx_qt_native_surface.h
+        src/map/bgfx/bgfx_qt_native_surface.cpp)
+    add_library(AOWIS::RenderQtSurface ALIAS aowis-render-qt-surface)
+    target_compile_features(aowis-render-qt-surface PUBLIC cxx_std_20)
+    target_include_directories(aowis-render-qt-surface PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(aowis-render-qt-surface PUBLIC AOWIS::RenderDevice Qt6::Gui)
+    if(UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN AND TARGET Qt6::GuiPrivate)
+        # qpa/qplatformnativeinterface.h: the wl_display / wl_surface and the
+        # X11 display of a window.
+        target_link_libraries(aowis-render-qt-surface PRIVATE Qt6::GuiPrivate)
+        target_compile_definitions(aowis-render-qt-surface PRIVATE
+            AOWIS_BGFX_NATIVE_WAYLAND_PRIVATE=1)
+    endif()
+    if(AOWIS_RENDER_BUILD_GEOMETRY_TESTS)
+        # No display: the offscreen QPA has no native handles to capture.
+        add_executable(aowis-render-bgfx-qt-native-surface-tests
+            tests/bgfx_qt_native_surface_test.cpp)
+        target_link_libraries(aowis-render-bgfx-qt-native-surface-tests
+            PRIVATE AOWIS::RenderQtSurface)
+        add_test(NAME aowis-render-bgfx-qt-native-surface
+            COMMAND aowis-render-bgfx-qt-native-surface-tests)
+        set_tests_properties(aowis-render-bgfx-qt-native-surface PROPERTIES
+            LABELS "aowis;rendering" ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
+endif()
+
 # A real executable link test catches missing symbols and missing static-library
 # Qt resources. It does not initialize bgfx or require a display/GPU.
 if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND AOWIS_RENDER_BUILD_MAP_CORE)
@@ -695,16 +734,19 @@ endif()
 # symbology / picking / snapshot adapter, decluttered labels and the native
 # HUD (layout, input, legend), and MapBgfxMapView: the toolkit-neutral map
 # view (frame loop, device lifecycle, native-window event routing, picking,
-# terrain queries). Host assets (model textures, HUD images), settings, the
-# native handle capture and the window embedding are injected by the host
-# (MapBgfxMapViewHost: the GUI's Qt Widgets surface, the mobile Qt Quick item).
+# terrain queries). Host assets (model textures, HUD images), settings and the
+# window embedding are injected by the host (MapBgfxMapViewHost: the GUI's Qt
+# Widgets surface, the mobile Qt Quick item); native handles come from
+# AOWIS::RenderQtSurface unless the host overrides the capture.
 option(AOWIS_RENDER_BUILD_MAP
     "Build the bgfx map renderers (RenderCore, RenderGlobeNetwork, RenderMapData)"
     ${AOWIS_RENDER_BUILD_MAP_CORE})
 if(AOWIS_RENDER_BUILD_MAP AND NOT (AOWIS_RENDER_BUILD_MAP_CORE
-        AND AOWIS_RENDER_BUILD_GLOBE_NETWORK AND AOWIS_RENDER_BUILD_MAP_DATA))
+        AND AOWIS_RENDER_BUILD_GLOBE_NETWORK AND AOWIS_RENDER_BUILD_MAP_DATA
+        AND AOWIS_RENDER_BUILD_QT_SURFACE))
     message(FATAL_ERROR "AOWIS_RENDER_BUILD_MAP requires AOWIS_RENDER_BUILD_MAP_CORE, "
-        "AOWIS_RENDER_BUILD_GLOBE_NETWORK and AOWIS_RENDER_BUILD_MAP_DATA")
+        "AOWIS_RENDER_BUILD_GLOBE_NETWORK, AOWIS_RENDER_BUILD_MAP_DATA and "
+        "AOWIS_RENDER_BUILD_QT_SURFACE")
 endif()
 if(AOWIS_RENDER_BUILD_MAP)
     find_package(Qt6 REQUIRED COMPONENTS Core Gui)
@@ -734,7 +776,8 @@ if(AOWIS_RENDER_BUILD_MAP)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
     target_link_libraries(aowis-render-map PUBLIC
         Qt6::Core Qt6::Gui AOWIS::RenderCore AOWIS::RenderGlobeNetwork
-        AOWIS::RenderGlobeTerrain AOWIS::RenderMapData AOWIS::RenderView)
+        AOWIS::RenderGlobeTerrain AOWIS::RenderMapData AOWIS::RenderView
+        AOWIS::RenderQtSurface)
     if(EMSCRIPTEN AND AOWIS_WASM_SIMD)
         target_compile_options(aowis-render-map PRIVATE -msimd128)
     endif()

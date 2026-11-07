@@ -107,8 +107,9 @@ public:
     ~MapBgfxMapView() override;
 
     // --- Host integration ---------------------------------------------------------
-    // Native handle discovery for a QWindow (desktop; platform specific, Qt
-    // private API). Without it the view cannot initialize on desktop.
+    // Native handle discovery for a QWindow (desktop). Default:
+    // BgfxQtNativeSurface::capture() (AOWIS::RenderQtSurface); a host
+    // overrides it only for a toolkit or platform that adapter lacks.
     using NativeSurfaceCapture = std::function<BgfxNativeSurface(QWindow *window)>;
     void setNativeSurfaceCapture(NativeSurfaceCapture capture);
     // The user's terrain detail setting, read live by the globe's surface

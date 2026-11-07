@@ -4,6 +4,7 @@
 #include "map/core/map_input_focus_policy.h"
 
 #include "map/bgfx/bgfx_device_manager.h"
+#include "map/bgfx/bgfx_qt_native_surface.h"
 #include "map/bgfx/map_bgfx_backend.h"
 #include "map/core/map_model.h"
 #include "map/data/map_terrain_repository.h"
@@ -173,6 +174,11 @@ MapBgfxMapView::MapBgfxMapView(MapModel *model, MapBgfxMapViewHost *view_host, Q
 {
     Q_ASSERT(this->map_model != nullptr);
     Q_ASSERT(this->host != nullptr);
+    // Qt's native handles (AOWIS::RenderQtSurface); a host may override it.
+    this->native_surface_capture = [](QWindow *window)
+    {
+        return BgfxQtNativeSurface::capture(window);
+    };
     setObjectName(QStringLiteral("aowis-bgfx-map-view"));
     this->camera_state = this->map_model->cameraViewState();
     this->globe_surface = std::make_unique<MapBgfxGlobeSurface>(this->map_model);

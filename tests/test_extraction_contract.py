@@ -158,11 +158,21 @@ for relative in ["src/map/bgfx/map_bgfx_map_view.h", "src/map/bgfx/map_bgfx_map_
     assert not re.search(r"\bauto\s+\w", text), relative
 assert not re.search(r"#include\s+<Q(Widget|VBoxLayout|Application)>|\bQWidget\s*[*&]|createWindowContainer\(\w", view)
 for token in ["guiConfiguration", "guiShortcutRegistry", "UnitProfileManager", "UnitAwareView",
-              "BgfxQtNativeSurface", "MapBgfxGlobeHudController", "MapScaleDistance",
+              "MapBgfxGlobeHudController", "MapScaleDistance",
               "mapGlobeTankAlbedoImage", '":/']:
     assert token not in view, token
 for token in ["this->host->mapViewVisible()", "this->host->mapViewPalette()",
               "this->host->mapViewFont()", "this->host->mapViewFocusNavigationInput(",
               "captureNativeSurface(this->native_window)", "this->globe_hud_state_provider("]:
     assert token in view_source, token
+# Qt native handle adapter: its own target over the Qt-free device; the map
+# view captures through it by default.
+assert "add_library(aowis-render-qt-surface STATIC" in cmake and "AOWIS::RenderQtSurface" in cmake
+assert "AOWIS_BGFX_NATIVE_WAYLAND_PRIVATE=1" in cmake
+assert "BgfxQtNativeSurface::capture(window)" in view_source
+for relative in ["src/map/bgfx/bgfx_device_manager.cpp", "src/map/bgfx/bgfx_device_manager.h",
+                 "src/map/bgfx/bgfx_frame_coordinator.cpp", "src/map/bgfx/bgfx_frame_coordinator.h",
+                 "src/map/bgfx/bgfx_native_target_registry.cpp", "src/map/bgfx/bgfx_native_target_registry.h",
+                 "src/map/bgfx/bgfx_native_surface.h"]:
+    assert not re.search(r"#include\s+<Q", (root / relative).read_text()), relative
 print("Renderer extraction and shader-family contract: OK")

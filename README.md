@@ -110,9 +110,10 @@ registered resources without source-level dependency on GUI resource files.
   picking, terrain queries, HUD. A `QObject`, no Qt Widgets. The host
   implements `MapBgfxMapViewHost` (visibility, font, palette, focus; WASM:
   size, ratio, cursor), embeds `nativeInputWindow()`, forwards its events
-  (`handleHostShown()`, `handleKeyPress()`, ...) and injects native handle
-  capture, terrain detail, model textures, HUD images, navigation keys, the
-  scale bar and the globe HUD state. The GUI's `MapBgfxSurface` is that host
+  (`handleHostShown()`, `handleKeyPress()`, ...) and injects terrain
+  detail, model textures, HUD images, navigation keys, the scale bar and the
+  globe HUD state. Native handles come from `BgfxQtNativeSurface`
+  (`AOWIS::RenderQtSurface`) unless the host overrides the capture. The GUI's `MapBgfxSurface` is that host
   for Qt Widgets.
 
 **Network render contract**
@@ -143,7 +144,11 @@ registered resources without source-level dependency on GUI resource files.
 **Device and 2D**
 
 - Process-wide bgfx device/target management: `BgfxDeviceManager`,
-  `BgfxFrameCoordinator`, `BgfxNativeTargetRegistry`, `BgfxNativeSurface`.
+  `BgfxFrameCoordinator`, `BgfxNativeTargetRegistry`, `BgfxNativeSurface`
+  (Qt-free, `AOWIS::RenderDevice`).
+- `BgfxQtNativeSurface` (`AOWIS::RenderQtSurface`): QWindow -> native
+  handles (winId; Wayland/XCB display through Qt6::GuiPrivate when present),
+  for every Qt host's bgfx windows.
 - Web Mercator/camera math, 2D network scene/mesh and 2D GPU submission.
 - 2D imagery atlas/upload support, style-binding interface, HUD texture/text
   cache and shader resources.
