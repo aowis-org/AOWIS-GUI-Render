@@ -1607,7 +1607,7 @@ void MapBgfxMapView::setNetworkScreenTranslation(const QPointF &translation)
 bool MapBgfxMapView::handleHudWheelEvent(QWheelEvent *event)
 {
     requestRedraw();
-    if (event == nullptr || !this->initialized)
+    if (!this->host->mapViewHudEnabled() || event == nullptr || !this->initialized)
         return false;
     const QPointF position = event->position();
     if (this->hud.wheelZoomsAtCrosshair(position.x(), position.y()) && this->navigation_wheel)
@@ -1646,7 +1646,7 @@ void MapBgfxMapView::dispatchHudCommands()
 bool MapBgfxMapView::handleHudKeyPress(QKeyEvent *event)
 {
     requestRedraw();
-    if (event == nullptr || !this->initialized || event->key() != Qt::Key_Escape)
+    if (!this->host->mapViewHudEnabled() || event == nullptr || !this->initialized || event->key() != Qt::Key_Escape)
         return false;
     return this->hud.closePopup();
 }
@@ -1690,7 +1690,7 @@ void MapBgfxMapView::setHudKeyboardPan(const QPointF &direction)
 MapBgfxMapView::HudPointer MapBgfxMapView::handleHudMouseEvent(QMouseEvent *event)
 {
     HudPointer result;
-    if (event == nullptr || !this->initialized)
+    if (!this->host->mapViewHudEnabled() || event == nullptr || !this->initialized)
         return result;
     const QPointF position = event->position();
     result.over_panel = this->hud.blocksInput(position.x(), position.y());
@@ -2831,7 +2831,7 @@ void MapBgfxMapView::renderFrameAt(double elapsed_seconds)
     }
 #endif
     const bool animating = !this->ready_reported || this->debug_overlay_enabled
-        || this->hud.animating() || this->imagery_uploads_pending
+        || (this->host->mapViewHudEnabled() && this->hud.animating()) || this->imagery_uploads_pending
         || (globe_shown && this->globe_pending)
         || (this->distribution_network_visible && this->label_settings.anyEnabled()
             && this->labels_dirty);
@@ -2978,9 +2978,10 @@ void MapBgfxMapView::renderFrameAt(double elapsed_seconds)
         }
     }
     // The HUD is submitted last into the Sequential map view: always on top.
-    renderHud(logical, MapBgfx2d::cameraFor(
-        this->camera_state.center_lon_deg, this->camera_state.center_lat_deg,
-        this->camera_state.continuous_2d_zoom, logical.width(), logical.height()));
+    if (this->host->mapViewHudEnabled())
+        renderHud(logical, MapBgfx2d::cameraFor(
+            this->camera_state.center_lon_deg, this->camera_state.center_lat_deg,
+            this->camera_state.continuous_2d_zoom, logical.width(), logical.height()));
     if (this->debug_overlay_enabled)
         renderDebugOverlay();
     bool submitted = false;

@@ -69,6 +69,8 @@ public:
 
     // The host's area is shown (a hidden page/tab pauses rendering).
     virtual bool mapViewVisible() const = 0;
+    // Hosts that supply their own map controls can omit the bgfx HUD.
+    virtual bool mapViewHudEnabled() const { return true; }
     // HUD font and theme colours (window background, HUD palette).
     virtual QFont mapViewFont() const = 0;
     virtual QPalette mapViewPalette() const = 0;
