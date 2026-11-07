@@ -118,7 +118,12 @@ elseif(APPLE)
     target_link_libraries(bx PUBLIC "-framework Foundation")
 elseif(NOT EMSCRIPTEN)
     find_package(Threads REQUIRED)
-    target_link_libraries(bx PUBLIC Threads::Threads ${CMAKE_DL_LIBS} rt)
+    target_link_libraries(bx PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+    if(NOT ANDROID)
+        # Android's Bionic libc contains the POSIX realtime functions; the
+        # NDK ships no separate librt.
+        target_link_libraries(bx PUBLIC rt)
+    endif()
 endif()
 if(EMSCRIPTEN)
     # bx threading is unsupported on Emscripten (bgfx runs single-threaded
