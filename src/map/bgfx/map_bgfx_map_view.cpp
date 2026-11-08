@@ -1035,6 +1035,8 @@ void MapBgfxMapView::releaseGpuResources()
     this->hud_gpu.release();
     this->overlay_gpu.release();
     this->label_gpu.release();
+    this->panorama_gpu.release();
+    this->panorama_upload_pending = !this->panorama_image.isNull();
     // Everything staged on the GPU is gone with the device.
     this->highlights_dirty = true;
     this->labels_dirty = true;
@@ -1797,6 +1799,81 @@ void MapBgfxMapView::renderOverlay(const QSizeF &logical, const MapBgfx2d::Camer
         this->overlay_builder(&this->overlay_canvas, &this->overlay_text_cache, camera, logical);
     this->overlay_gpu.uploadAtlas(&this->overlay_text_cache);
     this->overlay_gpu.draw(this->map_view_id, this->overlay_canvas, logical, offset);
+}
+
+void MapBgfxMapView::setPanorama(const QImage &equirectangular)
+{
+    this->panorama_image = equirectangular.isNull()
+        ? QImage() : equirectangular.convertToFormat(QImage::Format_RGBA8888);
+    this->panorama_upload_pending = !this->panorama_image.isNull();
+    if (this->panorama_image.isNull())
+        this->panorama_gpu.releaseImage();
+    requestRedraw();
+}
+
+bool MapBgfxMapView::panoramaShown() const
+{
+    return !this->panorama_image.isNull() && this->map_model != nullptr
+        && this->map_model->globeEyePose().has_value();
+}
+
+void MapBgfxMapView::renderPanorama(const QSizeF &logical)
+{
+    if (!this->panorama_gpu.ready() && !this->panorama_gpu.initialize(&MapBgfxBackend::loadProgram))
+        return;
+    if (this->panorama_upload_pending)
+    {
+        this->panorama_upload_pending = false;
+        QImage image = this->panorama_image;
+        const bgfx::Caps *caps = bgfx::getCaps();
+        const int limit = caps != nullptr ? int(caps->limits.maxTextureSize) : 4096;
+        if (image.width() > limit || image.height() > limit)
+            image = image.scaled(std::min(image.width(), limit), std::min(image.height(), limit),
+                                 Qt::KeepAspectRatio, Qt::SmoothTransformation)
+                        .convertToFormat(QImage::Format_RGBA8888);
+        // Tightly packed rows, top row first.
+        std::vector<std::uint8_t> pixels(std::size_t(image.width()) * std::size_t(image.height()) * 4u);
+        for (int row = 0; row < image.height(); ++row)
+            std::copy_n(image.constScanLine(row), std::size_t(image.width()) * 4u,
+                        pixels.data() + std::size_t(row) * std::size_t(image.width()) * 4u);
+        if (!this->panorama_gpu.setImage(image.width(), image.height(), pixels.data()))
+            qWarning() << "bgfx panorama: texture upload failed" << image.size();
+    }
+    const std::optional<MapGlobeEyePose> &pose = this->map_model->globeEyePose();
+    if (!pose)
+        return;
+    // The globe's own camera for this frame: same orientation, field of view
+    // (with the magnification) and viewport as renderGlobe() would use.
+    const QSize viewport(std::max(1, qRound(logical.width())), std::max(1, qRound(logical.height())));
+    this->globe_camera.setViewportSize(viewport);
+    this->globe_camera.syncFromMapModel(*this->map_model);
+    this->globe_camera.updateRenderOrigin();
+    MapGlobeCameraBasis basis;
+    this->globe_camera.viewProjectionMatrix(&basis);
+    double longitude_deg = 0.0;
+    double latitude_deg = 0.0;
+    double height_m = 0.0;
+    if (!GeoWgs84Ellipsoid::ecefToGeodetic(pose->eye, &longitude_deg, &latitude_deg, &height_m))
+        return;
+    // View rays as the sky's (MapBgfxGlobeSurface::drawSky()).
+    const QVector3D forward = QVector3D::crossProduct(basis.up, basis.right).normalized();
+    const double tan_half_height = std::tan(qDegreesToRadians(this->map_model->globeFieldOfViewDeg() * 0.5));
+    const double aspect = double(viewport.width()) / double(viewport.height());
+    const QVector3D right = basis.right.normalized() * float(tan_half_height * aspect);
+    const QVector3D up = basis.up.normalized() * float(tan_half_height);
+    // Local east, north and up (geodetic) at the eye, in ECEF.
+    const double lon = qDegreesToRadians(longitude_deg);
+    const double lat = qDegreesToRadians(latitude_deg);
+    MapPanoramaView view;
+    view.forward = {forward.x(), forward.y(), forward.z()};
+    view.right = {right.x(), right.y(), right.z()};
+    view.up = {up.x(), up.y(), up.z()};
+    view.east = {-std::sin(lon), std::cos(lon), 0.0};
+    view.north = {-std::sin(lat) * std::cos(lon), -std::sin(lat) * std::sin(lon), std::cos(lat)};
+    view.zenith = {std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
+    MapPanoramaGrid::build(view, MapPanoramaGrid::DefaultColumns, MapPanoramaGrid::DefaultRows,
+                           &this->panorama_vertices);
+    this->panorama_gpu.draw(this->map_view_id, this->panorama_vertices);
 }
 
 void MapBgfxMapView::renderGlobe(const QSizeF &logical, bool camera_moving)
@@ -2968,7 +3045,12 @@ void MapBgfxMapView::renderFrameAt(double elapsed_seconds)
     {
         // 2D imagery uploads are not pending while the 2D map is not drawn.
         this->imagery_uploads_pending = false;
-        if (globe_shown)
+        if (globe_shown && panoramaShown())
+        {
+            // Look-around panorama test mode: no map work this frame.
+            renderPanorama(logical);
+        }
+        else if (globe_shown)
         {
             renderGlobe(logical, camera_moved);
             // Project the selected map/terrain tile lattice independently of
@@ -2978,7 +3060,7 @@ void MapBgfxMapView::renderFrameAt(double elapsed_seconds)
         }
     }
     // The HUD is submitted last into the Sequential map view: always on top.
-    if (this->host->mapViewHudEnabled())
+    if (this->host->mapViewHudEnabled() && !panoramaShown())
         renderHud(logical, MapBgfx2d::cameraFor(
             this->camera_state.center_lon_deg, this->camera_state.center_lat_deg,
             this->camera_state.continuous_2d_zoom, logical.width(), logical.height()));

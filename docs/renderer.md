@@ -395,6 +395,19 @@ uniforms, the missing-imagery and polar-cap textures and the draw submission;
   altitude, black above the atmosphere except for the thin bright band along
   the limb; the surface covers everything below the horizon. Drawn with the
   map tiles (not in the wireframe-only view); optional like the heatmap.
+* Look-around panorama test mode (`MapBgfxMapView::setPanorama()`,
+  `map_bgfx_panorama_grid.h`, `map_bgfx_panorama_gpu.h`): while a globe eye
+  pose is set, an equirectangular 360-degree image replaces the globe, its
+  overlay and the HUD; camera sampling, pacing, on-demand rendering and
+  presentation are unchanged. It tells a slow map frame apart from uneven
+  motion on a device. The image is drawn with the imagery program
+  (`vs_imagery_2d` / `fs_imagery_2d`), so no shader binaries change: a
+  96 x 54 grid over the screen, each vertex carrying the image coordinate of
+  its view ray (the globe camera's, as the sky's; east/north/up at the eye),
+  one transient vertex buffer, one draw. Cells across the image seam unwrap
+  their u (the sampler repeats horizontally, clamps vertically); only the
+  cell containing the zenith or nadir smears. Tests:
+  `aowis-render-panorama-grid`, `aowis-render-panorama-gpu-mock`.
 * Window vertices are a persistent pool (`MapGlobeSurfacePreparation`):
   a tile keeps its vertex range while it stays in the window, a dropped
   tile's range is reused by the next new tile of that size, the pool grows

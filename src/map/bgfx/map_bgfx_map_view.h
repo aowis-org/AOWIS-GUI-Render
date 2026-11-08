@@ -17,6 +17,7 @@
 #include "map/bgfx/map_bgfx_hud_text_cache.h"
 #include "map/bgfx/map_bgfx_labels.h"
 #include "map/bgfx/map_bgfx_pan_reuse.h"
+#include "map/bgfx/map_bgfx_panorama_gpu.h"
 #include "map/core/map_frame_pacer.h"
 #include "map/render/map_camera_view_state.h"
 #include "map/render/map_globe_camera.h"
@@ -217,6 +218,14 @@ public:
     // Called once per presented frame with the paced elapsed time, *before*
     // the camera is sampled. This surface is then the only navigation clock.
     void setNavigationFrameHandler(NavigationFrameHandler advance);
+    // Look-around panorama test mode (map_bgfx_panorama_grid.h): while a
+    // globe eye pose is set, this equirectangular 360-degree image (u = 0.5
+    // facing north) is drawn instead of the map, the network, overlays and
+    // the HUD, through the same camera, frame pacing and presentation. Only
+    // the map's rendering work is left out, so it tells a slow map apart
+    // from uneven motion. A null image ends it.
+    void setPanorama(const QImage &equirectangular);
+    bool panoramaShown() const;
     // Mouse press/release/move on the embedded native window (desktop).
     // Returns true when consumed, like MapWidget::handleMouse*Event().
     using NavigationMouseHandler = std::function<bool(QMouseEvent *)>;
@@ -470,6 +479,7 @@ private:
     void renderOverlay(const QSizeF &logical, const MapBgfx2d::Camera &camera);
     // Globe mode: terrain surface with the frame's camera (slice 1).
     void renderGlobe(const QSizeF &logical, bool camera_moving);
+    void renderPanorama(const QSizeF &logical);
     // Draws the globe overlay (when a builder is set) after renderGlobe().
     void renderGlobeOverlay(const QSizeF &logical);
     // The globe's viewport: logical pixels of the drawn surface, rounded.
@@ -547,6 +557,11 @@ private:
     // the surface shares imagery_gpu's atlas with the 2D map.
     MapGlobeCamera globe_camera;
     std::unique_ptr<MapBgfxGlobeSurface> globe_surface;
+    // Panorama test mode (setPanorama()).
+    MapBgfxPanoramaGpu panorama_gpu;
+    QImage panorama_image;
+    bool panorama_upload_pending = false;
+    std::vector<MapPanoramaVertex> panorama_vertices;
     MapTerrainRepository *terrain_repository = nullptr;
     // Terrain-aware navigation over globe_surface's retained DEM meshes.
     MapGlobeTerrainNavigation terrain_navigation;
