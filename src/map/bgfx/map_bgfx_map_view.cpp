@@ -2238,6 +2238,7 @@ void MapBgfxMapView::renderHud(const QSizeF &logical, const MapBgfx2d::Camera &c
     this->hud.setViewMode(this->camera_state.mode == MapViewMode::TwoD, this->globe_ready);
     MapBgfxHud::FrameInputs inputs;
     inputs.viewport = logical;
+    inputs.layout_direction = this->host->mapViewLayoutDirection();
     inputs.two_d = this->camera_state.mode == MapViewMode::TwoD;
     inputs.camera = camera;
     inputs.time_s = double(this->hud_clock.elapsed()) / 1000.0;
@@ -2345,12 +2346,15 @@ void MapBgfxMapView::handleHostHidden()
 
 void MapBgfxMapView::handleHostChange(QEvent::Type type)
 {
-    if (type == QEvent::LanguageChange)
+    if (type == QEvent::LanguageChange || type == QEvent::LayoutDirectionChange)
     {
+        // The HUD remeasures translated text and reanchors RTL controls in
+        // the next frame. Do not reset the camera, atlas, or active popup.
         this->hud.languageChanged();
         this->labels_dirty = true;
         requestRedraw();
-        emit localizedPresentationRefreshRequested();
+        if (type == QEvent::LanguageChange)
+            emit localizedPresentationRefreshRequested();
     }
     if (type == QEvent::FontChange)
         this->hud.setFont(this->host->mapViewFont());

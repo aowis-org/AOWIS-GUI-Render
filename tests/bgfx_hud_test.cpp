@@ -1513,6 +1513,61 @@ void testRuntimeLanguageRefresh()
         "Qt text atlas accepts a UTF-8 Arabic run without a GPU");
 }
 
+
+// Right-to-left is a presentation input from the host. It must not reverse
+// coordinates, camera movement or the semantic actions behind a control.
+void testLiveRightToLeftHud()
+{
+    QFont font;
+    font.setPixelSize(13);
+    MapBgfxHud hud;
+    hud.setFont(font);
+    hud.setViewMode(true, false);
+    MapBgfxHud::Legend legend = legendContent();
+    legend.groups[0].items[0] = QStringLiteral("العقد");
+    hud.setLegend(legend);
+    MapBgfxHudCanvas canvas;
+    MapBgfxHudTextCache cache(2048);
+    const MapBgfxHud::Palette palette;
+    MapBgfxHud::FrameInputs inputs = frameInputs(true);
+    inputs.layout_direction = Qt::RightToLeft;
+    hud.build(&canvas, &cache, inputs, palette);
+
+    req(cache.containsText(QStringLiteral("العقد"), font),
+        "RTL HUD shapes Arabic legend labels in the text atlas");
+    req(!canvas.overflowed(), "RTL HUD produces a valid draw list");
+    MapBgfxHud::Command command;
+    const double segment_height = std::ceil(QFontMetricsF(font).height() + 6.0);
+    const double fullscreen_x = ViewportWidth - MapBgfxHud::MarginPx - 6.0
+        - 0.5 * segment_height;
+    req(click(&hud, fullscreen_x, MapBgfxHud::MarginPx + 6.0 + 0.5 * segment_height,
+              &command) == MapBgfxHud::Action::ToggleFullscreen,
+        "RTL fullscreen action is mirrored to the right without changing command");
+    req(click(&hud, MapBgfxHud::MarginPx + 38.0,
+              MapBgfxHud::MarginPx + 76.0 + 8.0 + 6.0 + 17.0,
+              &command) == MapBgfxHud::Action::ZoomIn,
+        "RTL zoom action is mirrored under the left-hand joystick");
+
+    const LegendLayout layout = legendLayout(font);
+    const double rtl_legend_x = MapBgfxHud::MarginPx;
+    req(hud.blocksInput(rtl_legend_x + 4.0, layout.y + 4.0),
+        "RTL legend panel is anchored at the bottom left");
+    const double combo_x = rtl_legend_x + MapBgfxHud::LegendPaddingPx + 30.0;
+    req(hud.mousePress(combo_x, layout.node_combo_y + 5.0),
+        "RTL legend combo opens at the mirrored position");
+    hud.build(&canvas, &cache, inputs, palette);
+    req(hud.popupOpen() && !canvas.overflowed(),
+        "RTL combo popup stays open with valid hit targets");
+
+    inputs.layout_direction = Qt::LeftToRight;
+    hud.languageChanged();
+    hud.build(&canvas, &cache, inputs, palette);
+    req(hud.popupOpen() && hud.blocksInput(layout.x + 4.0, layout.y + 4.0),
+        "live RTL-to-LTR switch reanchors the existing legend without closing popup");
+    req(!hud.blocksInput(rtl_legend_x + 4.0, layout.y + 4.0),
+        "stale RTL hit regions cannot intercept pointer input after language change");
+}
+
 int main(int argc, char **argv)
 {
     // Fonts need a GUI application; no window is ever shown.
@@ -1538,7 +1593,8 @@ int main(int argc, char **argv)
         {"gradient", testGradient},
         {"legend/palette", testLegend},
         {"globe controls", testGlobe},
-        {"runtime translations", testRuntimeLanguageRefresh}
+        {"runtime translations", testRuntimeLanguageRefresh},
+        {"live RTL HUD layout", testLiveRightToLeftHud}
     };
     for (const TimedTest &test : tests)
     {

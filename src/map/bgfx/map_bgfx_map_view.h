@@ -75,6 +75,9 @@ public:
     // HUD font and theme colours (window background, HUD palette).
     virtual QFont mapViewFont() const = 0;
     virtual QPalette mapViewPalette() const = 0;
+    // The host may override the application direction (for example a QWidget).
+    // Default keeps older and HUD-free Qt Quick hosts source-compatible.
+    virtual Qt::LayoutDirection mapViewLayoutDirection() const { return Qt::LeftToRight; }
     // Gives the map keyboard focus (a click on the native window); the host
     // activates its window and its key receiver.
     virtual void mapViewFocusNavigationInput(Qt::FocusReason reason) = 0;

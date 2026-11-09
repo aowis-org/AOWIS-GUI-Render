@@ -346,6 +346,7 @@ void MapBgfxHud::setLegend(const Legend &legend)
 void MapBgfxHud::build(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
                        const FrameInputs &inputs, const Palette &palette)
 {
+    this->right_to_left = inputs.layout_direction == Qt::RightToLeft;
     updateMeshPanel(inputs.time_s);
     cache->beginFrame();
     canvas->clear();
@@ -445,15 +446,22 @@ double MapBgfxHud::downloadPanel(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *
     const MapBgfxHudRect panel{x, y, width, height};
     drawPanel(canvas, panel, palette);
     const double ratio = cache->devicePixelRatio();
+    const std::function<double(double, double)> item_x =
+        [this, &panel](double left_to_right_x, double item_width)
+    {
+        return this->right_to_left
+            ? panel.right() - (left_to_right_x - panel.x) - item_width : left_to_right_x;
+    };
 
     double cursor = x + DownloadMarginLeftPx;
-    drawText(canvas, cache, cursor, y + 0.5 * (height - title_size.height()), title,
-             this->bold_font, palette.text);
+    drawText(canvas, cache, item_x(cursor, title_size.width()),
+             y + 0.5 * (height - title_size.height()), title, this->bold_font, palette.text);
     cursor += title_size.width() + DownloadSpacingPx;
 
     // Indeterminate busy bar (QProgressBar range 0..0): a chunk sweeping
     // back and forth over a dim track.
-    const MapBgfxHudRect track{snap(cursor, ratio), snap(y + 0.5 * (height - BusyBarHeightPx), ratio),
+    const MapBgfxHudRect track{snap(item_x(cursor, BusyBarWidthPx), ratio),
+                               snap(y + 0.5 * (height - BusyBarHeightPx), ratio),
                                BusyBarWidthPx, BusyBarHeightPx};
     canvas->fillRoundedRect(track, 2.0, withAlpha(palette.border, 110));
     const double chunk_width = 0.4 * BusyBarWidthPx;
@@ -464,13 +472,15 @@ double MapBgfxHud::downloadPanel(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *
                             2.0, palette.highlight);
     cursor += BusyBarWidthPx + DownloadSpacingPx;
 
-    drawText(canvas, cache, cursor, y + 0.5 * (height - label_size.height()), label, this->font,
-             palette.text);
+    drawText(canvas, cache, item_x(cursor, label_width)
+                 + (this->right_to_left ? label_width - label_size.width() : 0.0),
+             y + 0.5 * (height - label_size.height()), label, this->font, palette.text);
     cursor += label_width + DownloadSpacingPx;
 
     const double button_height = buttonHeight(cache);
     drawButton(canvas, cache,
-               MapBgfxHudRect{snap(cursor, ratio), snap(y + 0.5 * (height - button_height), ratio),
+               MapBgfxHudRect{snap(item_x(cursor, cancel_width), ratio),
+                              snap(y + 0.5 * (height - button_height), ratio),
                               cancel_width, button_height},
                cancel_text, Target{cancel, -1, -1}, !cancel_pending, false, palette);
     return width;
@@ -504,8 +514,10 @@ void MapBgfxHud::scaleBar(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
     to_wgs84(sample_x, &lon0, &lat0);
     to_wgs84(sample_x + maximum_bar_width, &lon1, &lat1);
     const ScaleBar scale = this->scale_provider(lon0, lat0, lon1, lat1, maximum_bar_width);
-    drawScalePanel(canvas, cache, MarginPx, std::max(MarginPx, viewport_height - ScaleHeightPx - MarginPx),
-                   scale, palette);
+    const double scale_x = this->right_to_left
+        ? std::max(MarginPx, viewport_width - ScaleWidthPx - MarginPx) : MarginPx;
+    drawScalePanel(canvas, cache, scale_x,
+                   std::max(MarginPx, viewport_height - ScaleHeightPx - MarginPx), scale, palette);
 }
 
 void MapBgfxHud::drawScalePanel(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache, double x, double y,
@@ -635,14 +647,26 @@ void MapBgfxHud::buildOnce(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
         if (toggles)
             content_width += ViewToggleSpacingPx + width_wireframe + ControlsSpacingPx + width_map
                 + ControlsSpacingPx + width_hillshade;
-        const MapBgfxHudRect frame{MarginPx, MarginPx, 2.0 * FramePaddingPx + content_width,
+        const double frame_width = 2.0 * FramePaddingPx + content_width;
+        const double frame_x = this->right_to_left
+            ? std::max(MarginPx, viewport_width - MarginPx - frame_width) : MarginPx;
+        const MapBgfxHudRect frame{frame_x, MarginPx, frame_width,
                                    2.0 * FramePaddingPx + segment_height};
         drawPanel(canvas, frame, palette);
         double x = frame.x + FramePaddingPx;
         const double y = frame.y + FramePaddingPx;
+        // Preserve the semantic order from the right edge in RTL, and use
+        // the same mirrored rectangle for drawing and mouse hit testing.
+        const std::function<MapBgfxHudRect(double, double)> button_rect =
+            [this, &frame, y, segment_height](double logical_x, double width)
+        {
+            const double draw_x = this->right_to_left
+                ? frame.right() - (logical_x - frame.x) - width : logical_x;
+            return MapBgfxHudRect{draw_x, y, width, segment_height};
+        };
 
         // Fullscreen: a square button with the icon.
-        const MapBgfxHudRect fullscreen_button{x, y, segment_height, segment_height};
+        const MapBgfxHudRect fullscreen_button = button_rect(x, segment_height);
         drawButton(canvas, cache, fullscreen_button, QString(), Target{Element::Fullscreen, -1, -1}, true,
                    false, palette,
                    this->fullscreen_active ? tr("Leave the map fullscreen")
@@ -654,7 +678,7 @@ void MapBgfxHud::buildOnce(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
             const MapBgfxHudSprite sprite = cache->image(
                 this->fullscreen_active ? QStringLiteral("fullscreen-exit") : QStringLiteral("fullscreen"),
                 icon, QSizeF(icon_extent, icon_extent));
-            canvas->sprite(snap(x + 0.5 * (segment_height - icon_extent), ratio),
+            canvas->sprite(snap(fullscreen_button.x + 0.5 * (segment_height - icon_extent), ratio),
                            snap(y + 0.5 * (segment_height - icon_extent), ratio), sprite, 0xffffffffu);
         }
         x += segment_height;
@@ -662,25 +686,25 @@ void MapBgfxHud::buildOnce(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
         if (this->view_switch_visible)
         {
             x += ViewToggleSpacingPx;
-            drawButton(canvas, cache, MapBgfxHudRect{x, y, width_2d, segment_height}, label_2d,
+            drawButton(canvas, cache, button_rect(x, width_2d), label_2d,
                        Target{Element::ViewMode2d, -1, -1}, true, this->two_d, palette);
             x += width_2d;
-            drawButton(canvas, cache, MapBgfxHudRect{x, y, width_3d, segment_height}, label_3d,
+            drawButton(canvas, cache, button_rect(x, width_3d), label_3d,
                        Target{Element::ViewMode3d, -1, -1}, this->globe_available, !this->two_d, palette);
             x += width_3d;
         }
         if (toggles)
         {
             x += ViewToggleSpacingPx;
-            drawButton(canvas, cache, MapBgfxHudRect{x, y, width_wireframe, segment_height}, label_wireframe,
+            drawButton(canvas, cache, button_rect(x, width_wireframe), label_wireframe,
                        Target{Element::GlobeWireframe, -1, -1}, true, this->globe.wireframe, palette,
                        tr("Draw the 3D globe terrain mesh as a wireframe."));
             x += width_wireframe + ControlsSpacingPx;
-            drawButton(canvas, cache, MapBgfxHudRect{x, y, width_map, segment_height}, label_map,
+            drawButton(canvas, cache, button_rect(x, width_map), label_map,
                        Target{Element::GlobeMapTiles, -1, -1}, true, this->globe.map_tiles, palette,
                        tr("Draw map tiles as textures on the 3D globe surface."));
             x += width_map + ControlsSpacingPx;
-            drawButton(canvas, cache, MapBgfxHudRect{x, y, width_hillshade, segment_height}, label_hillshade,
+            drawButton(canvas, cache, button_rect(x, width_hillshade), label_hillshade,
                        Target{Element::GlobeHillshade, -1, -1}, true, this->globe.hillshade, palette,
                        tr("Shade the 3D terrain relief, lit from the north-west."));
         }
@@ -726,11 +750,18 @@ double MapBgfxHud::meshPanel(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cach
     const MapBgfxHudRect panel{x, y, width, height};
     drawPanel(canvas, panel, palette);
     const double ratio = cache->devicePixelRatio();
+    const std::function<double(double, double)> item_x =
+        [this, &panel](double left_to_right_x, double item_width)
+    {
+        return this->right_to_left
+            ? panel.right() - (left_to_right_x - panel.x) - item_width : left_to_right_x;
+    };
     double cursor = x + MeshMarginHorizontalPx;
-    drawText(canvas, cache, cursor, y + 0.5 * (height - title_size.height()), title, this->bold_font,
-             palette.text);
+    drawText(canvas, cache, item_x(cursor, title_size.width()),
+             y + 0.5 * (height - title_size.height()), title, this->bold_font, palette.text);
     cursor += title_size.width() + DownloadSpacingPx;
-    const MapBgfxHudRect track{snap(cursor, ratio), snap(y + 0.5 * (height - BusyBarHeightPx), ratio),
+    const MapBgfxHudRect track{snap(item_x(cursor, MeshBarWidthPx), ratio),
+                               snap(y + 0.5 * (height - BusyBarHeightPx), ratio),
                                MeshBarWidthPx, BusyBarHeightPx};
     canvas->fillRoundedRect(track, 2.0, withAlpha(palette.border, 110));
     if (total > 0)
@@ -750,7 +781,9 @@ double MapBgfxHud::meshPanel(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cach
                                 2.0, palette.highlight);
     }
     cursor += MeshBarWidthPx + DownloadSpacingPx;
-    drawText(canvas, cache, cursor, y + 0.5 * (height - label_size.height()), label, this->font, palette.text);
+    drawText(canvas, cache, item_x(cursor, label_width)
+                 + (this->right_to_left ? label_width - label_size.width() : 0.0),
+             y + 0.5 * (height - label_size.height()), label, this->font, palette.text);
     return width;
 }
 
@@ -879,7 +912,8 @@ void MapBgfxHud::joystick(MapBgfxHudCanvas *canvas, const FrameInputs &inputs, c
 {
     // A ring with an arrow towards each side and the knob inside, shown at
     // the deflection the map reports while a drag runs (setJoystick()).
-    const double x = std::max(MarginPx, inputs.viewport.width() - MarginPx - JoystickDiameterPx);
+    const double x = this->right_to_left ? MarginPx
+        : std::max(MarginPx, inputs.viewport.width() - MarginPx - JoystickDiameterPx);
     const double y = MarginPx;
     const MapBgfxHudRect rect{x, y, JoystickDiameterPx, JoystickDiameterPx};
     this->joystick_rect = rect;
@@ -962,7 +996,8 @@ void MapBgfxHud::zoomButtons(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cach
     // (the icons of the former sidebar buttons).
     const double ratio = cache->devicePixelRatio();
     const double width = ZoomButtonExtentPx + 2.0 * FramePaddingPx;
-    const double joystick_x = std::max(MarginPx, inputs.viewport.width() - MarginPx - JoystickDiameterPx);
+    const double joystick_x = this->right_to_left ? MarginPx
+        : std::max(MarginPx, inputs.viewport.width() - MarginPx - JoystickDiameterPx);
     const MapBgfxHudRect frame{std::floor(joystick_x + 0.5 * (JoystickDiameterPx - width)),
                                MarginPx + JoystickDiameterPx + PanelSpacingPx, width,
                                2.0 * ZoomButtonExtentPx + ControlsSpacingPx + 2.0 * FramePaddingPx};
@@ -1013,16 +1048,22 @@ void MapBgfxHud::globeControls(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *ca
     // Camera sliders (MapMonitorVerticalControlsHudWidget), bottom left.
     const double column_height = 2.0 * SliderColumnMarginPx + 3.0 * label_height + SliderHeightPx
         + 3.0 * SliderColumnSpacingPx;
-    const MapBgfxHudRect sliders{MarginPx,
+    const double sliders_width = 2.0 * SliderPanelPaddingPx
+        + double(GlobeSliderCount) * SliderColumnWidthPx;
+    const double sliders_x = this->right_to_left
+        ? std::max(MarginPx, viewport_width - MarginPx - sliders_width) : MarginPx;
+    const MapBgfxHudRect sliders{sliders_x,
                                  std::max(MarginPx, viewport_height - MarginPx - column_height
                                                         - 2.0 * SliderPanelPaddingPx),
-                                 2.0 * SliderPanelPaddingPx + double(GlobeSliderCount) * SliderColumnWidthPx,
+                                 sliders_width,
                                  column_height + 2.0 * SliderPanelPaddingPx};
     drawPanel(canvas, sliders, palette);
     for (int index = 0; index < GlobeSliderCount; ++index)
     {
         drawSlider(canvas, cache,
-                   MapBgfxHudRect{sliders.x + SliderPanelPaddingPx + double(index) * SliderColumnWidthPx,
+                   MapBgfxHudRect{sliders.x + SliderPanelPaddingPx
+                                      + double(this->right_to_left ? GlobeSliderCount - 1 - index : index)
+                                            * SliderColumnWidthPx,
                                   sliders.y + SliderPanelPaddingPx, SliderColumnWidthPx, column_height},
                    index, palette);
     }
@@ -1040,9 +1081,13 @@ void MapBgfxHud::globeControls(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *ca
         button_width = std::max(button_width, buttonWidth(cache, label));
     const double button_height = buttonHeight(cache);
     const double underground_height = 2.0 * UndergroundPaddingPx + 3.0 * button_height + 2.0 * UndergroundSpacingPx;
-    const MapBgfxHudRect underground{sliders.right() + ControlsSpacingPx,
+    const double underground_width = button_width + 2.0 * UndergroundPaddingPx;
+    const double underground_x = this->right_to_left
+        ? sliders.x - ControlsSpacingPx - underground_width
+        : sliders.right() + ControlsSpacingPx;
+    const MapBgfxHudRect underground{underground_x,
                                      std::max(MarginPx, viewport_height - MarginPx - underground_height),
-                                     button_width + 2.0 * UndergroundPaddingPx, underground_height};
+                                     underground_width, underground_height};
     drawPanel(canvas, underground, palette);
     for (int mode = 0; mode < 3; ++mode)
     {
@@ -1062,7 +1107,9 @@ void MapBgfxHud::globeControls(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *ca
                                               std::ceil(heading_size.width() + 2.0 * CompassLabelPaddingPx));
     const double label_panel_height = std::ceil(label_height + 2.0 * DownloadMarginVerticalPx);
     const double compass_block_height = CompassDiameterPx + CompassLabelSpacingPx + label_panel_height;
-    const double compass_x = underground.right() + CompassGapPx;
+    const double compass_x = this->right_to_left
+        ? underground.x - CompassGapPx - label_panel_width
+        : underground.right() + CompassGapPx;
     const double compass_y = std::max(MarginPx, viewport_height - MarginPx - compass_block_height);
     drawCompass(canvas, cache, compass_x + 0.5 * (label_panel_width - CompassDiameterPx), compass_y, palette);
     const MapBgfxHudRect heading_panel{compass_x, compass_y + CompassDiameterPx + CompassLabelSpacingPx,
@@ -1074,11 +1121,14 @@ void MapBgfxHud::globeControls(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *ca
 
     // Globe scale: right of the compass, above the controls when the
     // viewport is too narrow (positionDesktopHudWidgets()).
-    double scale_x = compass_x + label_panel_width + CompassGapPx;
+    double scale_x = this->right_to_left
+        ? compass_x - CompassGapPx - ScaleWidthPx
+        : compass_x + label_panel_width + CompassGapPx;
     double scale_y = std::max(MarginPx, viewport_height - ScaleHeightPx - MarginPx);
-    if (scale_x + ScaleWidthPx > viewport_width - MarginPx)
+    if (scale_x < MarginPx || scale_x + ScaleWidthPx > viewport_width - MarginPx)
     {
-        scale_x = MarginPx;
+        scale_x = this->right_to_left
+            ? std::max(MarginPx, viewport_width - ScaleWidthPx - MarginPx) : MarginPx;
         scale_y = std::max(MarginPx, std::min({sliders.y, underground.y, compass_y}) - ScaleHeightPx - CompassGapPx);
     }
     drawScalePanel(canvas, cache, scale_x, scale_y, this->globe.scale, palette);
@@ -1189,7 +1239,8 @@ void MapBgfxHud::legendPanel(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cach
     const double height = 2.0 * LegendPaddingPx + content_height
         + LegendSpacingPx * double(std::max(0, rows - 1));
     // Bottom right (positionDesktopHudWidgets()).
-    const MapBgfxHudRect panel{std::max(MarginPx, viewport_width - width - MarginPx),
+    const MapBgfxHudRect panel{this->right_to_left ? MarginPx
+                                   : std::max(MarginPx, viewport_width - width - MarginPx),
                                std::max(MarginPx, viewport_height - height - MarginPx),
                                width, height};
     drawPanel(canvas, panel, palette);
@@ -1235,13 +1286,17 @@ void MapBgfxHud::drawCombo(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
     // Current item, elided like QComboBox's label.
     const QString text = content.items.value(content.current);
     const double available = rect.width - ComboTextPaddingPx - ComboArrowAreaPx;
-    const QString shown = QFontMetricsF(this->font).elidedText(text, Qt::ElideRight, available);
+    const QString shown = QFontMetricsF(this->font).elidedText(
+        text, this->right_to_left ? Qt::ElideLeft : Qt::ElideRight, available);
     const QSizeF size = cache->measure(shown, this->font);
-    drawText(canvas, cache, rect.x + ComboTextPaddingPx, rect.y + 0.5 * (rect.height - size.height()),
+    const double text_x = this->right_to_left
+        ? rect.right() - ComboTextPaddingPx - size.width() : rect.x + ComboTextPaddingPx;
+    drawText(canvas, cache, text_x, rect.y + 0.5 * (rect.height - size.height()),
              shown, this->font, palette.button_text);
 
     // Drop-down arrow.
-    const double center_x = rect.right() - 0.5 * ComboArrowAreaPx;
+    const double center_x = this->right_to_left
+        ? rect.x + 0.5 * ComboArrowAreaPx : rect.right() - 0.5 * ComboArrowAreaPx;
     const double center_y = rect.y + 0.5 * rect.height;
     canvas->fillTriangle(MapBgfxHudPoint{center_x - ComboArrowHalfWidthPx, center_y - ComboArrowHalfHeightPx},
                          MapBgfxHudPoint{center_x + ComboArrowHalfWidthPx, center_y - ComboArrowHalfHeightPx},
@@ -1488,7 +1543,8 @@ void MapBgfxHud::comboPopup(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache
     for (int row = 0; row < rows; ++row)
     {
         const int index = this->combo_scroll + row;
-        const MapBgfxHudRect item{list.x + PopupFramePx,
+        const MapBgfxHudRect item{list.x + PopupFramePx
+                                      + (this->right_to_left ? scroll_width : 0.0),
                                   list.y + PopupFramePx + double(row) * item_height,
                                   list.width - 2.0 * PopupFramePx - scroll_width, item_height};
         const Target target{Element::LegendComboItem, this->open_combo, index};
@@ -1497,10 +1553,13 @@ void MapBgfxHud::comboPopup(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache
         if (highlighted)
             canvas->fillRect(item, palette.highlight);
         const QString shown = QFontMetricsF(this->font).elidedText(
-            content.items.at(index), Qt::ElideRight,
+            content.items.at(index), this->right_to_left ? Qt::ElideLeft : Qt::ElideRight,
             item.width - 2.0 * ComboItemPaddingHorizontalPx);
         const QSizeF size = cache->measure(shown, this->font);
-        drawText(canvas, cache, item.x + ComboItemPaddingHorizontalPx,
+        const double text_x = this->right_to_left
+            ? item.right() - ComboItemPaddingHorizontalPx - size.width()
+            : item.x + ComboItemPaddingHorizontalPx;
+        drawText(canvas, cache, text_x,
                  item.y + 0.5 * (item.height - size.height()), shown, this->font,
                  highlighted ? palette.highlighted_text : palette.text);
         addHitBox(item, target, true, Cursor::PointingHand);
@@ -1514,11 +1573,14 @@ void MapBgfxHud::comboPopup(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache
         // is the visible share of the list, readable on light and dark
         // palettes: text colour at low alpha, stronger on hover, highlight
         // while dragged.
-        const MapBgfxHudRect track{list.right() - PopupFramePx - scroll_width,
+        const MapBgfxHudRect track{this->right_to_left ? list.x + PopupFramePx
+                                        : list.right() - PopupFramePx - scroll_width,
                                    list.y + PopupFramePx, scroll_width,
                                    list.height - 2.0 * PopupFramePx};
         canvas->fillRect(track, withAlpha(palette.text, 22));
-        canvas->line(track.x + 0.5, track.y, track.x + 0.5, track.bottom(), 1.0,
+        const double separator_x = this->right_to_left ? track.right() - 0.5
+                                                      : track.x + 0.5;
+        canvas->line(separator_x, track.y, separator_x, track.bottom(), 1.0,
                      withAlpha(palette.border, 160));
         const double inner_height = track.height - 2.0 * ComboScrollThumbInsetPx;
         const double thumb_height = std::min(inner_height, std::max(ComboScrollThumbMinimumPx,
@@ -1578,7 +1640,8 @@ void MapBgfxHud::paletteMenu(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cach
 
     // QMenu::popup() at the ramp widget's left edge, 4 px below the ramp;
     // above the ramp when it does not fit below; always inside the map.
-    const double anchor_x = bar.x - LegendRampInsetXPx;
+    const double anchor_x = this->right_to_left
+        ? bar.right() + LegendRampInsetXPx - width : bar.x - LegendRampInsetXPx;
     double x = std::min(anchor_x, viewport_width - ViewportEdgePx - width);
     x = std::max(ViewportEdgePx, x);
     double y = bar.bottom() + SwatchGapPx;
@@ -1601,25 +1664,35 @@ void MapBgfxHud::paletteMenu(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cach
             // Section header: title, then a rule to the right edge.
             const QString title = choice.diverging ? tr("Diverging") : tr("Sequential");
             const QSizeF title_size = cache->measure(title, this->font);
-            drawText(canvas, cache, row_left, cursor_y + 0.5 * (section_height - title_size.height()),
+            const double title_x = this->right_to_left
+                ? row_right - title_size.width() : row_left;
+            drawText(canvas, cache, title_x,
+                     cursor_y + 0.5 * (section_height - title_size.height()),
                      title, this->font, palette.disabled_text);
             const double rule_y = std::floor(cursor_y + 0.5 * section_height) + 0.5;
-            const double rule_left = row_left + title_size.width() + MenuRowSpacingPx;
-            if (rule_left < row_right)
-                canvas->line(rule_left, rule_y, row_right, rule_y, 1.0, palette.border);
+            const double rule_left = this->right_to_left ? row_left
+                : row_left + title_size.width() + MenuRowSpacingPx;
+            const double rule_right = this->right_to_left
+                ? title_x - MenuRowSpacingPx : row_right;
+            if (rule_left < rule_right)
+                canvas->line(rule_left, rule_y, rule_right, rule_y, 1.0, palette.border);
             cursor_y += section_height;
         }
 
         const QSizeF name_size = cache->measure(choice.name, this->font);
-        drawText(canvas, cache, row_left, cursor_y + 0.5 * (row_height - name_size.height()),
+        const double name_x = this->right_to_left
+            ? row_right - name_size.width() : row_left;
+        drawText(canvas, cache, name_x, cursor_y + 0.5 * (row_height - name_size.height()),
                  choice.name, this->font, palette.text);
 
         const bool selected = ramp.palette == choice.value;
         const double button_y = cursor_y + MenuRowMarginVerticalPx;
-        const MapBgfxHudRect flip{row_right - flip_width, button_y, flip_width,
-                                  PalettePreviewHeightPx};
-        const MapBgfxHudRect preview{flip.x - MenuRowSpacingPx - PalettePreviewWidthPx, button_y,
-                                     PalettePreviewWidthPx, PalettePreviewHeightPx};
+        const MapBgfxHudRect flip{this->right_to_left ? row_left : row_right - flip_width,
+                                  button_y, flip_width, PalettePreviewHeightPx};
+        const MapBgfxHudRect preview{this->right_to_left
+                                         ? flip.right() + MenuRowSpacingPx
+                                         : flip.x - MenuRowSpacingPx - PalettePreviewWidthPx,
+                                     button_y, PalettePreviewWidthPx, PalettePreviewHeightPx};
         drawButton(canvas, cache, preview, QString(),
                    Target{Element::LegendPalette, group, int(index)}, true, selected, palette,
                    tr("Use %1 colors").arg(choice.name));
@@ -1648,7 +1721,9 @@ void MapBgfxHud::paletteMenu(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cach
         canvas->fillRect(reset, palette.highlight);
     const QString reset_text = tr("Reset");
     const QSizeF reset_size = cache->measure(reset_text, this->font);
-    drawText(canvas, cache, row_left, reset.y + 0.5 * (reset.height - reset_size.height()),
+    const double reset_x = this->right_to_left
+        ? row_right - reset_size.width() : row_left;
+    drawText(canvas, cache, reset_x, reset.y + 0.5 * (reset.height - reset_size.height()),
              reset_text, this->font, reset_hovered ? palette.highlighted_text : palette.text);
     addHitBox(reset, reset_target, true, Cursor::PointingHand);
 }
@@ -1675,19 +1750,30 @@ void MapBgfxHud::tooltipBox(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache
         return;
     }
 
-    const QStringList lines = box->tooltip.split(QLatin1Char('\n'));
-    const double line_height = cache->measure(QStringLiteral("Ag"), this->font).height();
-    double text_width = 0.0;
-    for (const QString &line : lines)
-        text_width = std::max(text_width, cache->measure(line, this->font).width());
-    const double width = std::ceil(text_width + 2.0 * TooltipPaddingPx);
-    const double height = std::ceil(double(lines.size()) * line_height + 2.0 * TooltipPaddingPx);
     const double viewport_width = inputs.viewport.width();
     const double viewport_height = inputs.viewport.height();
-    double x = this->pointer_x + TooltipOffsetXPx;
+    const double max_text_width = std::max(1.0, viewport_width
+        - 2.0 * (ViewportEdgePx + TooltipPaddingPx));
+    const QFontMetricsF metrics(this->font);
+    QStringList lines = box->tooltip.split(QLatin1Char('\n'));
+    const double line_height = cache->measure(QStringLiteral("Ag"), this->font).height();
+    double text_width = 0.0;
+    for (QString &line : lines)
+    {
+        // Elide exceptionally long lines instead of painting outside the
+        // native map surface. Keep separate lines and their hitbox unchanged.
+        if (metrics.horizontalAdvance(line) > max_text_width)
+            line = metrics.elidedText(line,
+                this->right_to_left ? Qt::ElideLeft : Qt::ElideRight, max_text_width);
+        text_width = std::max(text_width, cache->measure(line, this->font).width());
+    }
+    const double width = std::ceil(text_width + 2.0 * TooltipPaddingPx);
+    const double height = std::ceil(double(lines.size()) * line_height + 2.0 * TooltipPaddingPx);
+    double x = this->right_to_left ? this->pointer_x - TooltipOffsetXPx - width
+                                    : this->pointer_x + TooltipOffsetXPx;
     double y = this->pointer_y + TooltipOffsetYPx;
-    if (x + width > viewport_width - ViewportEdgePx)
-        x = std::max(ViewportEdgePx, viewport_width - ViewportEdgePx - width);
+    x = std::clamp(x, ViewportEdgePx,
+                   std::max(ViewportEdgePx, viewport_width - ViewportEdgePx - width));
     if (y + height > viewport_height - ViewportEdgePx)
         y = std::max(ViewportEdgePx, this->pointer_y - height - SwatchGapPx);
     const MapBgfxHudRect tip{std::round(x), std::round(y), width, height};
@@ -1696,8 +1782,10 @@ void MapBgfxHud::tooltipBox(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache
     double line_y = tip.y + TooltipPaddingPx;
     for (const QString &line : lines)
     {
-        drawText(canvas, cache, tip.x + TooltipPaddingPx, line_y, line, this->font,
-                 palette.tooltip_text);
+        const double text_x = this->right_to_left
+            ? tip.right() - TooltipPaddingPx - cache->measure(line, this->font).width()
+            : tip.x + TooltipPaddingPx;
+        drawText(canvas, cache, text_x, line_y, line, this->font, palette.tooltip_text);
         line_y += line_height;
     }
 }

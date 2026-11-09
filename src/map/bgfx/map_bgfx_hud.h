@@ -251,6 +251,8 @@ public:
     struct FrameInputs
     {
         QSizeF viewport;
+        // Host UI direction, not the map projection or camera direction.
+        Qt::LayoutDirection layout_direction = Qt::LeftToRight;
         bool two_d = true;
         // 2D camera (continuous zoom), used for the GPS dot and the scale.
         MapBgfx2d::Camera camera;
@@ -565,6 +567,8 @@ private:
     bool two_d = true;
     bool globe_available = false;
     bool view_switch_visible = true;
+    // Derived afresh from FrameInputs for every draw; never persisted as a user setting.
+    bool right_to_left = false;
     bool fullscreen_active = false;
     QPointF joystick_deflection;
     bool joystick_active = false;

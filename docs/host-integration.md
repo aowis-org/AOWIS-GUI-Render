@@ -71,11 +71,11 @@ host's `MapModel`, a `MapBgfxMapViewHost` and the render target.
 Every host:
 
 - implements `MapBgfxMapViewHost`: `mapViewVisible()`, `mapViewFont()`,
-  `mapViewPalette()`, `mapViewFocusNavigationInput()`, and the area's logical
+  `mapViewPalette()`, `mapViewLayoutDirection()`, `mapViewFocusNavigationInput()`, and the area's logical
   size, device pixel ratio, screen, global position and cursor where the view
   has no window of its own (WASM, host context);
 - forwards `handleHostShown()`, `handleHostHidden()`, `handleHostResized()`,
-  `handleHostChange(type)` (language, palette, font) and, where the host owns
+  `handleHostChange(type)` (language, layout direction, palette, font) and, where the host owns
   the keyboard, `handleKeyPress()`, `handleKeyRelease()`, `handleFocusOut()`;
 - gives every pointer event to the HUD first (`handleHudMouseEvent()`,
   `handleHudWheelEvent()`) and acts on the returned `HudPointer`; a consumed
@@ -177,3 +177,20 @@ configured. A host recreates the repositories when the server changes.
 4. Qualify WebAssembly and Android separately: passing Linux tests says
    nothing about their GPU and lifecycle behaviour (Android: background and
    resume, scene-graph invalidation).
+
+### Live localization and right-to-left HUD
+
+`MapBgfxMapViewHost::mapViewLayoutDirection()` returns the current host
+layout direction; the default remains left-to-right for existing HUD-free
+hosts. Qt Widgets hosts should return their widget's `layoutDirection()`.
+`handleHostChange(QEvent::LanguageChange)` refreshes HUD text and asks the
+application to refresh its own legend/slider strings. A subsequent
+`LayoutDirectionChange` reanchors HUD panels without rebuilding the map or
+closing a legend popup. The map projection, GPS/terrain positions, navigation
+axes, compass heading, and color-ramp value progression never mirror.
+
+The GUI uses `GuiLanguage` for the `aowis_gui_*` and `aowis_render_*`
+translator resources; the Render library does not own or install translators.
+Use `aowis-render-bgfx-hud` to verify both live translation and RTL hitbox
+placement headlessly. Native/WASM screenshots and Arabic font shaping still
+need end-to-end acceptance on their actual Qt kits.
