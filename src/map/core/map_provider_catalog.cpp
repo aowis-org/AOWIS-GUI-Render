@@ -44,6 +44,7 @@ MapProviderCatalog::MapProviderCatalog(QObject *parent) : QObject(parent)
 void MapProviderCatalog::setServer(const MapServerRestConfiguration &server)
 {
     this->map_server = server;
+    this->network_manager.setProxy(server.proxy);
 }
 
 void MapProviderCatalog::setFallbackStore(const QHash<QString, QString> &fallbacks,

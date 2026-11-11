@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
+#include <QNetworkProxy>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QUrl>
@@ -18,8 +19,11 @@ class RESTClient : public QObject
 
 public:
     explicit RESTClient(const QString &url_base, QObject *parent = nullptr);
+    // proxy: set on each of this client's network managers (see
+    // MapServerRestConfiguration::proxy); DefaultProxy is Qt's default.
     RESTClient(const QString &url_base, const QByteArray &api_key,
-               const QByteArray &delete_api_key, QObject *parent = nullptr);
+               const QByteArray &delete_api_key, QObject *parent = nullptr,
+               const QNetworkProxy &proxy = QNetworkProxy());
 
     void get(const QString &endpoint);
     void getTile(const QString &endpoint, const QString &key);

@@ -21,7 +21,8 @@ InterfaceServerMapREST::InterfaceServerMapREST(const MapServerRestConfiguration 
 
 void InterfaceServerMapREST::initRestConnection(const MapServerRestConfiguration &server)
 {
-    this->rest = new RESTClient(server.base_url, server.api_key, server.delete_api_key, this);
+    this->rest = new RESTClient(server.base_url, server.api_key, server.delete_api_key, this,
+                                server.proxy);
 
     connect(this->rest, &RESTClient::requestFinishedTile, this,
             [this](const QByteArray &data, const QString &key)

@@ -23,7 +23,8 @@ RESTClient::RESTClient(const QString &url_base, QObject *parent)
 }
 
 RESTClient::RESTClient(const QString &url_base, const QByteArray &api_key,
-                       const QByteArray &delete_api_key, QObject *parent)
+                       const QByteArray &delete_api_key, QObject *parent,
+                       const QNetworkProxy &proxy)
     : QObject(parent),
       url_base(url_base.trimmed()),
       api_key(api_key),
@@ -31,6 +32,7 @@ RESTClient::RESTClient(const QString &url_base, const QByteArray &api_key,
 {
     while (this->url_base.endsWith('/'))
         this->url_base.chop(1);
+    this->network_manager.setProxy(proxy);
 
     const QUrl parsed_url(this->url_base);
     if (!parsed_url.isValid() || parsed_url.scheme().isEmpty() || parsed_url.host().isEmpty())
@@ -53,6 +55,7 @@ RESTClient::RESTClient(const QString &url_base, const QByteArray &api_key,
     for (int index = 0; index < TileNetworkManagerCount; ++index)
     {
         this->tile_network_managers.append(new QNetworkAccessManager(this));
+        this->tile_network_managers.last()->setProxy(proxy);
         this->tile_network_manager_loads.append(0);
     }
 #endif
