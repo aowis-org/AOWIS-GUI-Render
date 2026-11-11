@@ -3,9 +3,8 @@
 #include <QColor>
 #include <QFontMetricsF>
 #include <QPainter>
-#include <QPainterPath>
-#include <QPen>
 #include <QStringList>
+#include <QVector>
 
 #include <algorithm>
 #include <cmath>
@@ -18,6 +17,37 @@ constexpr int WhiteBlockExtent = 4;
 constexpr int EntryPadding = 1;
 // Logical padding left/right of a text run for glyph overhang (italic, "j").
 constexpr double TextPaddingPx = 1.0;
+
+// Whole physical pixels covering a logical length (at least 0).
+int physicalCeil(double logical, double ratio)
+{
+    return std::max(0, int(std::ceil(logical * ratio - 1e-6)));
+}
+
+// Premultiplied float colour of a 0xAARRGGBB value.
+struct PremultipliedColor
+{
+    float r = 0.0f;
+    float g = 0.0f;
+    float b = 0.0f;
+    float a = 0.0f;
+};
+
+PremultipliedColor premultipliedColor(quint32 argb)
+{
+    const float alpha = float(qAlpha(argb)) / 255.0f;
+    PremultipliedColor color;
+    color.a = alpha;
+    color.r = float(qRed(argb)) / 255.0f * alpha;
+    color.g = float(qGreen(argb)) / 255.0f * alpha;
+    color.b = float(qBlue(argb)) / 255.0f * alpha;
+    return color;
+}
+
+quint8 unitToByte(float value)
+{
+    return quint8(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+}
 }
 
 MapBgfxHudTextCache::MapBgfxHudTextCache(int atlas_extent)
@@ -138,13 +168,18 @@ MapBgfxHudSprite MapBgfxHudTextCache::text(const QString &text, const QFont &fon
     if (found != this->sprites.cend())
         return found.value();
 
+    // Texel exact: the sprite's logical size is its texel count / ratio and
+    // its origin a whole number of texels, so a run drawn at a position on
+    // the physical grid maps 1:1 onto screen pixels (point sampling, no
+    // dropped or doubled glyph columns at fractional ratios).
     const QSizeF advance = measure(text, font);
-    const QSizeF logical(std::ceil(advance.width() + 2.0 * TextPaddingPx),
-                         std::ceil(advance.height()));
     const double ratio = this->device_pixel_ratio;
-    QImage run(std::max(1, int(std::ceil(logical.width() * ratio))),
-               std::max(1, int(std::ceil(logical.height() * ratio))),
-               QImage::Format_RGBA8888_Premultiplied);
+    const int padding_texels = physicalCeil(TextPaddingPx, ratio);
+    const int width_texels = std::max(1, physicalCeil(advance.width(), ratio) + 2 * padding_texels);
+    const int height_texels = std::max(1, physicalCeil(advance.height(), ratio));
+    const QSizeF logical(double(width_texels) / ratio, double(height_texels) / ratio);
+    const double origin_x = double(padding_texels) / ratio;
+    QImage run(width_texels, height_texels, QImage::Format_RGBA8888_Premultiplied);
     run.fill(Qt::transparent);
     // Same logical DPI as the screen: point-sized fonts match the widgets.
     const int dots_per_meter = int(std::lround(this->logical_dpi / 0.0254));
@@ -157,11 +192,11 @@ MapBgfxHudSprite MapBgfxHudTextCache::text(const QString &text, const QFont &fon
         painter.setFont(font);
         painter.setPen(Qt::white);
         const QFontMetricsF metrics(font, &run);
-        painter.drawText(QPointF(TextPaddingPx, metrics.ascent()), text);
+        painter.drawText(QPointF(origin_x, metrics.ascent()), text);
     }
     run.setDevicePixelRatio(1.0);
     MapBgfxHudSprite sprite = store(run, logical);
-    sprite.origin_x = TextPaddingPx;
+    sprite.origin_x = origin_x;
     sprite.origin_y = 0.0;
     if (sprite.valid)
         this->sprites.insert(key, sprite);
@@ -219,12 +254,14 @@ QSizeF MapBgfxHudTextCache::measureBlock(const QString &text, const QFont &font)
 
 double MapBgfxHudTextCache::haloTextFootprint(const QSizeF &block, double halo_px) const
 {
-    // Same rounding as haloText(): halo and the overhang padding on every
-    // side, at the device ratio, plus the atlas entry padding.
-    const double margin = std::max(0.0, halo_px) + TextPaddingPx;
+    // Same rounding as haloText(): block, halo and the overhang padding on
+    // every side in whole texels, plus the atlas entry padding.
     const double ratio = this->device_pixel_ratio;
-    const double width = std::ceil((block.width() + 2.0 * margin) * ratio) + 2.0 * EntryPadding;
-    const double height = std::ceil((block.height() + 2.0 * margin) * ratio) + 2.0 * EntryPadding;
+    const int margin_texels = physicalCeil(std::max(0.0, halo_px) + TextPaddingPx, ratio);
+    const double width = double(std::max(1, physicalCeil(block.width(), ratio) + 2 * margin_texels))
+        + 2.0 * EntryPadding;
+    const double height = double(std::max(1, physicalCeil(block.height(), ratio) + 2 * margin_texels))
+        + 2.0 * EntryPadding;
     return width * height;
 }
 
@@ -244,44 +281,111 @@ MapBgfxHudSprite MapBgfxHudTextCache::haloText(const QString &text, const QFont 
     if (found != this->sprites.cend())
         return found.value();
 
+    // Texel exact like text(): whole-texel margin, logical size = texels /
+    // ratio, so a block placed on the physical grid is drawn 1:1.
     const double halo = std::max(0.0, halo_px);
-    const double margin = halo + TextPaddingPx;
-    const QSizeF block = measureBlock(text, font);
-    const QSizeF logical(std::ceil(block.width() + 2.0 * margin),
-                         std::ceil(block.height() + 2.0 * margin));
     const double ratio = this->device_pixel_ratio;
-    QImage run(std::max(1, int(std::ceil(logical.width() * ratio))),
-               std::max(1, int(std::ceil(logical.height() * ratio))),
-               QImage::Format_RGBA8888_Premultiplied);
-    run.fill(Qt::transparent);
+    const QSizeF block = measureBlock(text, font);
+    const int margin_texels = physicalCeil(halo + TextPaddingPx, ratio);
+    const int width_texels = std::max(1, physicalCeil(block.width(), ratio) + 2 * margin_texels);
+    const int height_texels = std::max(1, physicalCeil(block.height(), ratio) + 2 * margin_texels);
+    const QSizeF logical(double(width_texels) / ratio, double(height_texels) / ratio);
+    const double margin = double(margin_texels) / ratio;
+
+    // 1. Glyph coverage with the normal hinted text rasterizer (the same
+    //    glyphs as the widgets), NOT QPainterPath::addText(): an outline path
+    //    is unhinted, so small label text came out soft and smeared, and its
+    //    stroked halo ate into the counters of the glyphs.
+    QImage coverage(width_texels, height_texels, QImage::Format_ARGB32_Premultiplied);
+    coverage.fill(Qt::transparent);
     const int dots_per_meter = int(std::lround(this->logical_dpi / 0.0254));
-    run.setDotsPerMeterX(dots_per_meter);
-    run.setDotsPerMeterY(dots_per_meter);
-    run.setDevicePixelRatio(ratio);
+    coverage.setDotsPerMeterX(dots_per_meter);
+    coverage.setDotsPerMeterY(dots_per_meter);
+    coverage.setDevicePixelRatio(ratio);
     {
-        // One outline path for all lines: the halo is its stroke (round
-        // joins, twice the halo width, half of it outside the glyphs), the
-        // text its fill on top.
+        // Same metrics as measureBlock() (pixel-sized fonts: device free).
         const QFontMetricsF metrics(font);
         const QStringList lines = text.split(QLatin1Char('\n'));
-        QPainterPath path;
+        // Greyscale coverage: it is an alpha mask, LCD subpixel colour
+        // fringes would turn into coloured halos.
+        QFont mask_font(font);
+        mask_font.setStyleStrategy(QFont::StyleStrategy(font.styleStrategy() | QFont::NoSubpixelAntialias));
+        QPainter painter(&coverage);
+        painter.setRenderHint(QPainter::TextAntialiasing, true);
+        painter.setFont(mask_font);
+        painter.setPen(Qt::white);
         double baseline = margin + metrics.ascent();
         for (const QString &line : lines)
         {
-            const double line_x = margin + 0.5 * (block.width() - metrics.horizontalAdvance(line));
-            path.addText(QPointF(line_x, baseline), font, line);
+            // Lines centred on the widest one, each starting on the
+            // physical grid (hinting then keeps the stems sharp).
+            const double centred = margin + 0.5 * (block.width() - metrics.horizontalAdvance(line));
+            const double line_x = std::round(centred * ratio) / ratio;
+            painter.drawText(QPointF(line_x, baseline), line);
             baseline += metrics.height();
         }
-        QPainter painter(&run);
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        if (halo > 0.0)
-        {
-            painter.strokePath(path, QPen(QColor::fromRgba(halo_argb), 2.0 * halo, Qt::SolidLine,
-                                          Qt::RoundCap, Qt::RoundJoin));
-        }
-        painter.fillPath(path, QColor::fromRgba(text_argb));
     }
-    run.setDevicePixelRatio(1.0);
+    coverage.setDevicePixelRatio(1.0);
+
+    // 2. Halo: the coverage dilated by a disc of halo_px (physical radius,
+    //    antialiased rim), then the text composited over it. Exact for any
+    //    halo width, keeps the glyph shapes untouched.
+    const double radius = halo * ratio;
+    const int reach = halo > 0.0 ? int(std::ceil(radius + 0.5)) : 0;
+    struct Tap
+    {
+        int dx = 0;
+        int dy = 0;
+        float weight = 0.0f;
+    };
+    QVector<Tap> taps;
+    for (int dy = -reach; dy <= reach; ++dy)
+    {
+        for (int dx = -reach; dx <= reach; ++dx)
+        {
+            const double weight = std::clamp(radius + 0.5 - std::hypot(double(dx), double(dy)), 0.0, 1.0);
+            if (weight > 0.0)
+                taps.append(Tap{dx, dy, float(weight)});
+        }
+    }
+    QVector<float> alpha(qsizetype(width_texels) * qsizetype(height_texels), 0.0f);
+    for (int y = 0; y < height_texels; ++y)
+    {
+        const QRgb *line = reinterpret_cast<const QRgb *>(coverage.constScanLine(y));
+        for (int x = 0; x < width_texels; ++x)
+            alpha[qsizetype(y) * width_texels + x] = float(qAlpha(line[x])) / 255.0f;
+    }
+    const PremultipliedColor text_color = premultipliedColor(text_argb);
+    const PremultipliedColor halo_color = premultipliedColor(halo_argb);
+    QImage run(width_texels, height_texels, QImage::Format_RGBA8888_Premultiplied);
+    for (int y = 0; y < height_texels; ++y)
+    {
+        uchar *target = run.scanLine(y);
+        for (int x = 0; x < width_texels; ++x)
+        {
+            const float text_alpha = alpha.at(qsizetype(y) * width_texels + x);
+            float halo_alpha = 0.0f;
+            for (const Tap &tap : taps)
+            {
+                const int sx = x + tap.dx;
+                const int sy = y + tap.dy;
+                if (sx < 0 || sy < 0 || sx >= width_texels || sy >= height_texels)
+                    continue;
+                halo_alpha = std::max(halo_alpha,
+                                      alpha.at(qsizetype(sy) * width_texels + sx) * tap.weight);
+                if (halo_alpha >= 1.0f)
+                    break;
+            }
+            // Text over halo, premultiplied "source over".
+            const float text_a = text_alpha * text_color.a;
+            const float keep = 1.0f - text_a;
+            uchar *pixel = target + x * 4;
+            pixel[0] = unitToByte(text_color.r * text_alpha + halo_color.r * halo_alpha * keep);
+            pixel[1] = unitToByte(text_color.g * text_alpha + halo_color.g * halo_alpha * keep);
+            pixel[2] = unitToByte(text_color.b * text_alpha + halo_color.b * halo_alpha * keep);
+            pixel[3] = unitToByte(text_a + halo_color.a * halo_alpha * keep);
+        }
+    }
     MapBgfxHudSprite sprite = store(run, logical);
     sprite.origin_x = margin;
     sprite.origin_y = margin;

@@ -658,8 +658,17 @@ void testHaloSprite()
     req(sprite.valid, "halo: sprite stored");
     req(cache.containsHaloText(QStringLiteral("AB\nC"), font, 0xff000000u, 0xffffffffu, 1.5),
         "halo: cached after");
-    req(std::fabs(sprite.origin_x - (1.5 + 1.0)) < 1e-9 && std::fabs(sprite.origin_y - 2.5) < 1e-9,
-        "halo: layout origin inside the sprite (halo + padding)");
+    // Ratio 1: halo + padding (2.5) rounded up to whole texels.
+    req(std::fabs(sprite.origin_x - 3.0) < 1e-9 && std::fabs(sprite.origin_y - 3.0) < 1e-9,
+        "halo: layout origin inside the sprite (halo + padding), on whole texels");
+    const QRect halo_rect(int(std::lround(double(sprite.u0) * cache.atlas().width())),
+                          int(std::lround(double(sprite.v0) * cache.atlas().height())), 0, 0);
+    req(std::fabs(double(std::lround(double(sprite.u1 - sprite.u0) * cache.atlas().width()))
+                  - sprite.width) < 1e-9
+            && std::fabs(double(std::lround(double(sprite.v1 - sprite.v0) * cache.atlas().height()))
+                         - sprite.height) < 1e-9
+            && halo_rect.x() >= 0,
+        "halo: texel exact (logical size = texels at ratio 1)");
     req(sprite.width >= block.width() + 5.0 && sprite.height >= block.height() + 5.0,
         "halo: sprite covers block and halo");
     req(!cache.containsHaloText(QStringLiteral("AB\nC"), font, 0xff000000u, 0xffffffffu, 2.0),

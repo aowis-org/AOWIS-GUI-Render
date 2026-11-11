@@ -51,8 +51,13 @@ public:
     // (draw it with a white tint), readable over any imagery. Lines are
     // separated by '\n' and centred on the widest one. The layout box is the
     // text block without the halo (measureBlock()); origin_x/origin_y say
-    // where it lies inside the sprite. The font should be pixel sized: the
-    // outline path and the metrics then agree on every screen.
+    // where it lies inside the sprite. Glyphs come from the normal hinted
+    // text rasterizer; the halo is their coverage dilated by a disc.
+    //
+    // Every sprite of this cache (text() and haloText()) is texel exact: its
+    // logical size is its texel count / ratio and its origin a whole number
+    // of texels. Draw it with its layout origin on the physical pixel grid
+    // and it maps 1:1 onto screen pixels (the atlas is point sampled).
     MapBgfxHudSprite haloText(const QString &text, const QFont &font, quint32 text_argb,
                               quint32 halo_argb, double halo_px);
     // haloText() with these arguments is in the atlas (no rasterization).

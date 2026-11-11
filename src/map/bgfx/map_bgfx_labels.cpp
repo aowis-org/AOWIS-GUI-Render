@@ -33,6 +33,13 @@ MapBgfxHudRect symbolAt(const MapBgfxLabels::SymbolRect &symbol, InfrastructureE
     return rect;
 }
 
+// Logical coordinate on the physical pixel grid.
+double snapPhysical(double logical, double ratio)
+{
+    const double bounded = ratio > 0.0 ? ratio : 1.0;
+    return std::round(logical * bounded) / bounded;
+}
+
 // Size of the text cache measurement memo before it is dropped (values of a
 // running simulation produce new texts every time step).
 constexpr qsizetype MaximumCachedSizes = 40000;
@@ -465,6 +472,7 @@ bool MapBgfxLabels::build(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
         return first.entity_key < second.entity_key;
     });
 
+    const double ratio = cache->devicePixelRatio();
     const double atlas_limit = AtlasFillLimit * cache->capacity();
     double atlas_used = 0.0;
     for (const qsizetype candidate_index : order)
@@ -509,8 +517,11 @@ bool MapBgfxLabels::build(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
         }
         for (const MapBgfxHudPoint &position : positions)
         {
-            // Whole logical pixels: crisp text at ratio 1.
-            const MapBgfxHudRect box{std::round(position.x), std::round(position.y), w, h};
+            // On the physical pixel grid: the halo sprites are texel exact
+            // with a whole-texel origin, so the label lands 1:1 on screen
+            // pixels at every device ratio (1.25 and 1.5 included).
+            const MapBgfxHudRect box{snapPhysical(position.x, ratio),
+                                     snapPhysical(position.y, ratio), w, h};
             if (box.x < ViewportMarginPx || box.y < ViewportMarginPx
                 || box.right() > width - ViewportMarginPx
                 || box.bottom() > height - ViewportMarginPx)

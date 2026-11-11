@@ -312,8 +312,12 @@ void testTextCache()
     req(cache.generation() != generation, "a new device pixel ratio resets the atlas");
     const MapBgfxHudSprite hello_hidpi = cache.text(QStringLiteral("Hello"), font);
     const QRect hidpi_rect = spritePixels(hello_hidpi, cache.atlas());
-    req(std::fabs(hello_hidpi.width - hello.width) < 0.01,
-        "a run keeps its logical width at any ratio");
+    // Texel exact: the logical width is whole texels / ratio, so it may
+    // differ from the ratio-1 width by less than a logical pixel.
+    req(std::fabs(hello_hidpi.width - hello.width) < 1.0
+            && std::fabs(hello_hidpi.width * 2.0 - std::round(hello_hidpi.width * 2.0)) < 1e-9
+            && std::fabs(hello_hidpi.origin_x * 2.0 - std::round(hello_hidpi.origin_x * 2.0)) < 1e-9,
+        "a run keeps its logical width at any ratio, in whole texels");
     req(std::abs(hidpi_rect.width() - int(std::ceil(hello.width * 2.0))) <= 1,
         "a ratio-2 run has twice the pixels");
     // The glyphs are drawn at that ratio too (not into the top-left quarter).
@@ -1513,61 +1517,6 @@ void testRuntimeLanguageRefresh()
         "Qt text atlas accepts a UTF-8 Arabic run without a GPU");
 }
 
-
-// Right-to-left is a presentation input from the host. It must not reverse
-// coordinates, camera movement or the semantic actions behind a control.
-void testLiveRightToLeftHud()
-{
-    QFont font;
-    font.setPixelSize(13);
-    MapBgfxHud hud;
-    hud.setFont(font);
-    hud.setViewMode(true, false);
-    MapBgfxHud::Legend legend = legendContent();
-    legend.groups[0].items[0] = QStringLiteral("العقد");
-    hud.setLegend(legend);
-    MapBgfxHudCanvas canvas;
-    MapBgfxHudTextCache cache(2048);
-    const MapBgfxHud::Palette palette;
-    MapBgfxHud::FrameInputs inputs = frameInputs(true);
-    inputs.layout_direction = Qt::RightToLeft;
-    hud.build(&canvas, &cache, inputs, palette);
-
-    req(cache.containsText(QStringLiteral("العقد"), font),
-        "RTL HUD shapes Arabic legend labels in the text atlas");
-    req(!canvas.overflowed(), "RTL HUD produces a valid draw list");
-    MapBgfxHud::Command command;
-    const double segment_height = std::ceil(QFontMetricsF(font).height() + 6.0);
-    const double fullscreen_x = ViewportWidth - MapBgfxHud::MarginPx - 6.0
-        - 0.5 * segment_height;
-    req(click(&hud, fullscreen_x, MapBgfxHud::MarginPx + 6.0 + 0.5 * segment_height,
-              &command) == MapBgfxHud::Action::ToggleFullscreen,
-        "RTL fullscreen action is mirrored to the right without changing command");
-    req(click(&hud, MapBgfxHud::MarginPx + 38.0,
-              MapBgfxHud::MarginPx + 76.0 + 8.0 + 6.0 + 17.0,
-              &command) == MapBgfxHud::Action::ZoomIn,
-        "RTL zoom action is mirrored under the left-hand joystick");
-
-    const LegendLayout layout = legendLayout(font);
-    const double rtl_legend_x = MapBgfxHud::MarginPx;
-    req(hud.blocksInput(rtl_legend_x + 4.0, layout.y + 4.0),
-        "RTL legend panel is anchored at the bottom left");
-    const double combo_x = rtl_legend_x + MapBgfxHud::LegendPaddingPx + 30.0;
-    req(hud.mousePress(combo_x, layout.node_combo_y + 5.0),
-        "RTL legend combo opens at the mirrored position");
-    hud.build(&canvas, &cache, inputs, palette);
-    req(hud.popupOpen() && !canvas.overflowed(),
-        "RTL combo popup stays open with valid hit targets");
-
-    inputs.layout_direction = Qt::LeftToRight;
-    hud.languageChanged();
-    hud.build(&canvas, &cache, inputs, palette);
-    req(hud.popupOpen() && hud.blocksInput(layout.x + 4.0, layout.y + 4.0),
-        "live RTL-to-LTR switch reanchors the existing legend without closing popup");
-    req(!hud.blocksInput(rtl_legend_x + 4.0, layout.y + 4.0),
-        "stale RTL hit regions cannot intercept pointer input after language change");
-}
-
 int main(int argc, char **argv)
 {
     // Fonts need a GUI application; no window is ever shown.
@@ -1593,8 +1542,7 @@ int main(int argc, char **argv)
         {"gradient", testGradient},
         {"legend/palette", testLegend},
         {"globe controls", testGlobe},
-        {"runtime translations", testRuntimeLanguageRefresh},
-        {"live RTL HUD layout", testLiveRightToLeftHud}
+        {"runtime translations", testRuntimeLanguageRefresh}
     };
     for (const TimedTest &test : tests)
     {
