@@ -3,6 +3,8 @@
 #include "map/bgfx/map_bgfx_hud.h"
 #include "map/render/map_network_render_symbology.h"
 
+#include <QStringList>
+
 #include <algorithm>
 #include <cmath>
 
@@ -40,9 +42,16 @@ double snapPhysical(double logical, double ratio)
     return std::round(logical * bounded) / bounded;
 }
 
-// Size of the text cache measurement memo before it is dropped (values of a
+// Size of the block measurement memo before it is dropped (values of a
 // running simulation produce new texts every time step).
 constexpr qsizetype MaximumCachedSizes = 40000;
+
+// 0xAARRGGBB with its alpha multiplied by opacity (0..1).
+quint32 withOpacity(quint32 argb, double opacity)
+{
+    const double alpha = double((argb >> 24) & 0xffu) * std::clamp(opacity, 0.0, 1.0);
+    return (quint32(std::lround(alpha)) << 24) | (argb & 0x00ffffffu);
+}
 }
 
 int MapBgfxLabels::priority(InfrastructureEntity entity_type, bool link)
@@ -109,16 +118,74 @@ QString MapBgfxLabels::labelText(const QString &id, bool show_id, bool show_valu
     return value_text;
 }
 
-QSizeF MapBgfxLabels::blockSize(const QString &text, MapBgfxHudTextCache *cache, const QFont &font)
+QSizeF MapBgfxLabels::blockSize(const QString &text, const QFontMetricsF &metrics)
 {
     const QHash<QString, QSizeF>::const_iterator found = this->block_size_by_text.constFind(text);
     if (found != this->block_size_by_text.cend())
         return found.value();
     if (this->block_size_by_text.size() >= MaximumCachedSizes)
         this->block_size_by_text.clear();
-    const QSizeF size = cache->measureBlock(text, font);
+    // Widest line x lines (MapBgfxHudTextCache::measureBlock()).
+    const QStringList lines = text.split(QLatin1Char('\n'));
+    double width = 0.0;
+    for (const QString &line : lines)
+        width = std::max(width, metrics.horizontalAdvance(line));
+    const QSizeF size(width, metrics.height() * double(lines.size()));
     this->block_size_by_text.insert(text, size);
     return size;
+}
+
+bool MapBgfxLabels::emitLabel(MapBgfxHudCanvas *canvas, MapBgfxGlyphAtlas *atlas,
+                              const Placed &placed, const QFont &font,
+                              const QFontMetricsF &metrics, quint32 tint_argb,
+                              int *glyphs_created)
+{
+    const QStringList lines = placed.text.split(QLatin1Char('\n'));
+    // 1. Every glyph in the atlas, within the budget.
+    for (const QString &line : lines)
+    {
+        for (const MapBgfxGlyphAtlas::LineGlyph &line_glyph : atlas->layoutLine(line, font))
+        {
+            if (atlas->contains(line_glyph.key))
+                continue;
+            if (*glyphs_created >= this->glyph_budget)
+                return false;
+            const MapBgfxGlyphAtlas::Glyph created = atlas->glyph(line_glyph.key, true);
+            if (!created.valid)
+                return false;
+            ++*glyphs_created;
+        }
+    }
+    // 2. One quad per visible glyph; lines centred on the widest one.
+    double line_top = placed.box.y;
+    for (const QString &line : lines)
+    {
+        const double line_left =
+            placed.box.x + 0.5 * (placed.box.width - metrics.horizontalAdvance(line));
+        for (const MapBgfxGlyphAtlas::LineGlyph &line_glyph : atlas->layoutLine(line, font))
+        {
+            const MapBgfxGlyphAtlas::Glyph glyph = atlas->glyph(line_glyph.key, false);
+            if (!glyph.valid || glyph.empty)
+                continue;
+            const double pen_x = line_left + line_glyph.pen.x();
+            const double pen_y = line_top + line_glyph.pen.y();
+            const MapBgfxHudRect quad{pen_x + glyph.x0 * line_glyph.scale,
+                                      pen_y + glyph.y0 * line_glyph.scale,
+                                      (glyph.x1 - glyph.x0) * line_glyph.scale,
+                                      (glyph.y1 - glyph.y0) * line_glyph.scale};
+            MapBgfxHudSprite sprite;
+            sprite.valid = true;
+            sprite.u0 = glyph.u0;
+            sprite.v0 = glyph.v0;
+            sprite.u1 = glyph.u1;
+            sprite.v1 = glyph.v1;
+            sprite.width = quad.width;
+            sprite.height = quad.height;
+            canvas->sprite(quad, sprite, tint_argb);
+        }
+        line_top += metrics.height();
+    }
+    return true;
 }
 
 void MapBgfxLabels::resetGrid(const QSizeF &viewport)
@@ -216,16 +283,16 @@ qsizetype MapBgfxLabels::insertObstacle(const MapBgfxHudRect &rect)
     return index;
 }
 
-bool MapBgfxLabels::build(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
+bool MapBgfxLabels::build(MapBgfxHudCanvas *canvas, MapBgfxGlyphAtlas *atlas,
                           const Inputs &inputs)
 {
     canvas->clear();
-    canvas->setWhiteTexel(cache->whiteU(), cache->whiteV());
     this->placed_labels.clear();
     this->last_stats = Stats();
     if (inputs.scene == nullptr || inputs.snapshot == nullptr || !inputs.settings.anyEnabled()
         || !(inputs.viewport.width() > 0.0) || !(inputs.viewport.height() > 0.0))
     {
+        this->fade_start_by_key.clear();
         return true;
     }
     const MapLabelSettings &settings = inputs.settings;
@@ -234,7 +301,10 @@ bool MapBgfxLabels::build(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
     const bool label_nodes = settings.node_ids || node_values;
     const bool label_links = settings.link_ids || link_values;
     if (!label_nodes && !label_links)
+    {
+        this->fade_start_by_key.clear();
         return true;
+    }
 
     synchronizeIdentity(*inputs.scene, *inputs.snapshot);
     if (this->size_cache_font_key != inputs.font.key())
@@ -472,18 +542,16 @@ bool MapBgfxLabels::build(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
         return first.entity_key < second.entity_key;
     });
 
-    const double ratio = cache->devicePixelRatio();
-    const double atlas_limit = AtlasFillLimit * cache->capacity();
-    double atlas_used = 0.0;
+    // Labels sit on the physical pixel grid of the screen the font metrics
+    // were made for (the SDF quads themselves need no snapping).
+    const double ratio = inputs.device_pixel_ratio > 0.0 ? inputs.device_pixel_ratio : 1.0;
+    const QFontMetricsF metrics(inputs.font);
     for (const qsizetype candidate_index : order)
     {
         if (this->placed_labels.size() >= MaximumLabels)
             break;
         const Candidate &candidate = candidates.at(candidate_index);
-        const QSizeF block = blockSize(candidate.text, cache, inputs.font);
-        const double footprint = cache->haloTextFootprint(block, HaloPx);
-        if (atlas_used + footprint > atlas_limit)
-            break;
+        const QSizeF block = blockSize(candidate.text, metrics);
         const double w = block.width();
         const double h = block.height();
         const MapBgfxHudRect &s = candidate.symbol;
@@ -517,9 +585,8 @@ bool MapBgfxLabels::build(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
         }
         for (const MapBgfxHudPoint &position : positions)
         {
-            // On the physical pixel grid: the halo sprites are texel exact
-            // with a whole-texel origin, so the label lands 1:1 on screen
-            // pixels at every device ratio (1.25 and 1.5 included).
+            // On the physical pixel grid: stable positions while panning
+            // (the pan reuse offset is snapped to the same grid).
             const MapBgfxHudRect box{snapPhysical(position.x, ratio),
                                      snapPhysical(position.y, ratio), w, h};
             if (box.x < ViewportMarginPx || box.y < ViewportMarginPx
@@ -535,50 +602,49 @@ bool MapBgfxLabels::build(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
             placed.text_argb = candidate.link ? LinkTextColor : NodeTextColor;
             placed.entity_key = candidate.entity_key;
             this->placed_labels.append(placed);
-            atlas_used += footprint;
             break;
         }
     }
     this->last_stats.placed = int(this->placed_labels.size());
 
-    // Draw; rasterize at most MaximumRasterizationsPerBuild new runs. If the
-    // atlas had to be cleared meanwhile, the sprites drawn before point at
-    // reused space: draw everything again once (the frame's labels fit).
-    cache->beginFrame();
-    for (int pass = 0; pass < 2; ++pass)
+    // Draw; at most glyph_budget new distance fields. An atlas that ran full
+    // in an earlier build starts over now, before any quad of this build
+    // refers to it (glyphs are never evicted while a canvas is built).
+    if (atlas->full())
+        atlas->clear();
+    QHash<quint64, double> fade_start;
+    int created = 0;
+    int drawn = 0;
+    int deferred = 0;
+    bool fading = false;
+    for (const Placed &placed : this->placed_labels)
     {
-        canvas->clear();
-        canvas->setWhiteTexel(cache->whiteU(), cache->whiteV());
-        int rasterized = 0;
-        int drawn = 0;
-        int deferred = 0;
-        for (const Placed &placed : this->placed_labels)
+        double opacity = 1.0;
+        double start = inputs.time_s;
+        if (inputs.time_s >= 0.0)
         {
-            if (!cache->containsHaloText(placed.text, inputs.font, placed.text_argb, HaloColor,
-                                         HaloPx))
-            {
-                if (rasterized >= MaximumRasterizationsPerBuild)
-                {
-                    ++deferred;
-                    continue;
-                }
-                ++rasterized;
-            }
-            const MapBgfxHudSprite sprite = cache->haloText(placed.text, inputs.font,
-                                                            placed.text_argb, HaloColor, HaloPx);
-            if (!sprite.valid)
-            {
-                ++deferred;
-                continue;
-            }
-            canvas->sprite(placed.box.x, placed.box.y, sprite, 0xffffffffu);
-            ++drawn;
+            start = this->fade_start_by_key.value(placed.entity_key, inputs.time_s);
+            opacity = FadeInSeconds > 0.0 ? (inputs.time_s - start) / FadeInSeconds : 1.0;
+            opacity = std::clamp(opacity, 0.0, 1.0);
         }
-        this->last_stats.drawn = drawn;
-        this->last_stats.deferred = deferred;
-        if (!cache->evictedSinceFrameStart())
-            break;
-        cache->beginFrame();
+        if (!emitLabel(canvas, atlas, placed, inputs.font, metrics,
+                       withOpacity(placed.text_argb, opacity), &created))
+        {
+            ++deferred;
+            continue;
+        }
+        ++drawn;
+        if (inputs.time_s >= 0.0)
+        {
+            fade_start.insert(placed.entity_key, start);
+            fading = fading || opacity < 1.0;
+        }
     }
-    return this->last_stats.deferred == 0;
+    this->last_stats.drawn = drawn;
+    this->last_stats.deferred = deferred;
+    this->last_stats.glyphs_created = created;
+    this->last_stats.fading = fading;
+    // Labels not drawn now fade in again when they come back.
+    this->fade_start_by_key.swap(fade_start);
+    return this->last_stats.deferred == 0 && !this->last_stats.fading;
 }

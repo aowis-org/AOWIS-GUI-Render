@@ -2127,12 +2127,10 @@ void MapBgfxMapView::renderLabels(const QSizeF &logical, const MapBgfx2d::Camera
     }
     const qreal ratio = viewDevicePixelRatio();
     const QScreen *label_screen = viewScreen();
-    if (!this->label_text_cache)
-        this->label_text_cache = std::make_unique<MapBgfxHudTextCache>(2048);
-    MapBgfxHudTextCache *cache = this->label_text_cache.get();
-    cache->setDevicePixelRatio(ratio);
+    if (!this->label_glyphs)
+        this->label_glyphs = std::make_unique<MapBgfxGlyphAtlas>(1024);
+    MapBgfxGlyphAtlas *glyphs = this->label_glyphs.get();
     const double dpi = label_screen != nullptr ? label_screen->logicalDotsPerInch() : 96.0;
-    cache->setLogicalDpi(dpi);
 
     LabelBuildKey key;
     key.world_pixels = network_camera.world_pixels;
@@ -2142,15 +2140,15 @@ void MapBgfxMapView::renderLabels(const QSizeF &logical, const MapBgfx2d::Camera
     key.icon_size_px = sizes.icon_size_px;
     key.device_pixel_ratio = ratio;
     key.preparation_id = this->prepared_2d_scenes.active().preparationId();
-    key.atlas_generation = cache->generation();
+    key.atlas_generation = glyphs->generation();
     // Unchanged content and zoom: a pure pan draws the last build translated
     // (it was built with a margin around the viewport, map_bgfx_pan_reuse.h).
     QPointF offset;
     if (this->labels_dirty || !(key == this->label_build_key)
         || !this->label_pan.reuse(network_camera, logical, ratio, &offset))
     {
-        // The application font one step smaller, pixel sized (the halo
-        // outline path and the metrics then agree; see haloText()).
+        // The application font one step smaller, pixel sized (the glyph
+        // layout and the placement metrics then agree on every screen).
         QFont font = QGuiApplication::font();
         const double point_size = font.pointSizeF() > 0.0 ? font.pointSizeF() : 9.0;
         font.setPixelSize(std::max(9, int(std::lround(0.92 * point_size * dpi / 72.0))));
@@ -2214,14 +2212,18 @@ void MapBgfxMapView::renderLabels(const QSizeF &logical, const MapBgfx2d::Camera
         inputs.node_symbol = this->label_node_symbol ? this->label_node_symbol : default_node_symbol;
         inputs.link_symbol = this->label_link_symbol ? this->label_link_symbol : default_link_symbol;
         inputs.font = font;
-        const bool complete = this->labels.build(&this->label_canvas, cache, inputs);
-        // Deferred labels: build again next frame even without a change.
+        inputs.device_pixel_ratio = ratio;
+        inputs.time_s = double(this->hud_clock.elapsed()) / 1000.0;
+        const bool complete = this->labels.build(&this->label_canvas, glyphs, inputs);
+        // Deferred or fading labels: build again next frame even without a
+        // change (labels_dirty keeps frames coming, see frame_animating).
         this->labels_dirty = !complete;
-        key.atlas_generation = cache->generation();
+        key.atlas_generation = glyphs->generation();
         this->label_build_key = key;
     }
-    this->label_gpu.uploadAtlas(cache);
-    this->label_gpu.draw(this->map_view_id, this->label_canvas, logical, offset);
+    this->label_gpu.uploadAtlas(glyphs);
+    this->label_gpu.draw(this->map_view_id, this->label_canvas, logical, MapBgfxLabels::HaloColor,
+                         MapBgfxLabels::HaloPx, ratio, offset);
 }
 
 void MapBgfxMapView::renderHud(const QSizeF &logical, const MapBgfx2d::Camera &camera)

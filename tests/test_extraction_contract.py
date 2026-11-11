@@ -16,9 +16,10 @@ for source in [
     "map_bgfx_globe_buffer_pool.cpp",
     "bgfx_native_target_registry.cpp", "map_bgfx_2d_imagery_gpu.cpp",
     "map_bgfx_hud_gpu.cpp", "map_bgfx_hud_text_cache.cpp",
+    "map_bgfx_glyph_atlas.cpp", "map_bgfx_label_gpu.cpp",
 ]:
     assert (root / "src/map/bgfx" / source).is_file(), source
-shader_names = ["vs_globe_surface", "fs_globe_surface", "vs_hud", "fs_hud"]
+shader_names = ["vs_globe_surface", "fs_globe_surface", "vs_hud", "fs_hud", "fs_label_sdf"]
 for family in ["glsl", "essl", "spirv", "metal", "dx11"]:
     for name in shader_names:
         assert (root / "src/map/bgfx/shaders/bin" / family / (name + ".bin")).is_file()

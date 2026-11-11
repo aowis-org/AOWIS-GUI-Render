@@ -4,7 +4,7 @@
 #include "map/bgfx/map_bgfx_2d_projection.h"
 #include "map/bgfx/map_bgfx_2d_scene.h"
 #include "map/bgfx/map_bgfx_hud_canvas.h"
-#include "map/bgfx/map_bgfx_hud_text_cache.h"
+#include "map/bgfx/map_bgfx_glyph_atlas.h"
 #include "map/render/map_label_settings.h"
 #include "network/network_render_snapshot.h"
 
@@ -12,6 +12,7 @@
 #include <QHash>
 #include <QSet>
 #include <QSizeF>
+#include <QFontMetricsF>
 #include <QString>
 #include <QVector>
 
@@ -57,15 +58,20 @@ struct MapBgfxLabelValueFormat
 //    lies inside the viewport and overlaps no placed label and no foreign
 //    obstacle wins; otherwise the label is dropped. A uniform grid of
 //    GridCellPx cells keeps each test local.
-// 4. Placement stops at MaximumLabels or when the labels' atlas footprint
-//    would exceed AtlasFillLimit of the label atlas, so one frame's labels
-//    always fit into it.
+// 4. Placement stops at MaximumLabels.
 //
-// Text runs are rasterized once (MapBgfxHudTextCache::haloText(): dark text
-// with a white outline, readable over imagery and over lines). At most
-// MaximumRasterizationsPerBuild new runs are rasterized per build; the rest
-// keep their place and appear in the next frames (build() reports it), so a
-// jump to a dense area never stalls one frame for long.
+// Text is drawn glyph by glyph from a signed-distance atlas
+// (MapBgfxGlyphAtlas, drawn by MapBgfxLabelGpu with fs_label_sdf): one quad
+// per glyph in the canvas, the text colour in the vertex tint, the white halo
+// a second threshold of the same distance in the shader. Glyphs, not
+// strings, are cached, so new values of a running simulation cost no
+// rasterization. At most MaximumGlyphsPerBuild glyphs new to the atlas get
+// their distance field per build (only the first frames after start); labels
+// that still lack one keep their place and appear in the next build.
+//
+// With Inputs::time_s >= 0 a label that was not drawn by the previous build
+// fades in over FadeInSeconds (MapLibre-style), so labels revealed by a zoom
+// or a pan do not pop; build() asks for further builds while one fades.
 //
 // Pure Qt Gui + math (no bgfx, no widgets): unit-tested without a GPU.
 class MapBgfxLabels
@@ -101,6 +107,10 @@ public:
         SymbolRect link_symbol;
         // Pixel-sized label font.
         QFont font;
+        // Seconds of a monotonic clock for the fade-in; < 0: no fading.
+        double time_s = -1.0;
+        // Physical px per logical px: labels are placed on that grid.
+        double device_pixel_ratio = 1.0;
     };
 
     struct Stats
@@ -108,8 +118,12 @@ public:
         int candidates = 0;
         int placed = 0;
         int drawn = 0;
-        // Placed but not rasterized yet (shown in a later build).
+        // Placed but missing glyphs yet (shown in a later build).
         int deferred = 0;
+        // Distance fields created by this build.
+        int glyphs_created = 0;
+        // A drawn label is still fading in.
+        bool fading = false;
         // More on-screen nodes than DenseNodeCount: junction and demand
         // point labels and obstacles are skipped.
         bool dense = false;
@@ -125,13 +139,17 @@ public:
     };
 
     // Builds the labels into canvas (cleared first). Returns false when
-    // labels were deferred (call again next frame even if nothing changed).
-    bool build(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache, const Inputs &inputs);
+    // labels were deferred or are fading in (call again next frame even if
+    // nothing changed).
+    bool build(MapBgfxHudCanvas *canvas, MapBgfxGlyphAtlas *atlas, const Inputs &inputs);
+    // New distance fields per build (tests lower it).
+    void setGlyphBudget(int glyphs) { this->glyph_budget = glyphs > 0 ? glyphs : 1; }
     const Stats &stats() const { return this->last_stats; }
     const QVector<Placed> &placed() const { return this->placed_labels; }
 
-    // Text and outline colours (0xAARRGGBB): nodes near black, links dark
-    // blue, so node and link labels are told apart at a glance.
+    // Text and halo colours (0xAARRGGBB): nodes near black, links dark
+    // blue, so node and link labels are told apart at a glance. The halo
+    // colour and width are MapBgfxLabelGpu::draw() arguments.
     static constexpr quint32 NodeTextColor = 0xff1e1e1eu;
     static constexpr quint32 LinkTextColor = 0xff0b3a78u;
     static constexpr quint32 HaloColor = 0xf2ffffffu;
@@ -144,8 +162,8 @@ public:
     static constexpr double MinimumLinkLengthPx = 24.0;
     static constexpr double GridCellPx = 48.0;
     static constexpr int MaximumLabels = 2500;
-    static constexpr double AtlasFillLimit = 0.7;
-    static constexpr int MaximumRasterizationsPerBuild = 160;
+    static constexpr int MaximumGlyphsPerBuild = 64;
+    static constexpr double FadeInSeconds = 0.18;
     static constexpr int DenseNodeCount = 30000;
 
     // Priority classes (lower first).
@@ -170,7 +188,12 @@ private:
     QString labelText(const QString &id, bool show_id, bool show_value,
                       const QVector<double> *values,
                       const MapBgfxLabelValueFormat &format, quint32 render_id) const;
-    QSizeF blockSize(const QString &text, MapBgfxHudTextCache *cache, const QFont &font);
+    QSizeF blockSize(const QString &text, const QFontMetricsF &metrics);
+    // Emits the glyph quads of a placed label; false when a glyph is
+    // missing and the budget is spent (nothing emitted).
+    bool emitLabel(MapBgfxHudCanvas *canvas, MapBgfxGlyphAtlas *atlas, const Placed &placed,
+                   const QFont &font, const QFontMetricsF &metrics, quint32 tint_argb,
+                   int *glyphs_created);
 
     // Occupancy grid over the viewport.
     void resetGrid(const QSizeF &viewport);
@@ -199,6 +222,9 @@ private:
 
     QVector<Placed> placed_labels;
     Stats last_stats;
+    int glyph_budget = MaximumGlyphsPerBuild;
+    // Fade-in start (Inputs::time_s) of every label the last build drew.
+    QHash<quint64, double> fade_start_by_key;
 };
 
 #endif // MAP_BGFX_LABELS_H

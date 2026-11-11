@@ -700,7 +700,11 @@ if(AOWIS_RENDER_BUILD_MAP_CORE)
         src/map/bgfx/map_bgfx_hud_gpu.cpp
         src/map/bgfx/map_bgfx_hud_gpu.h
         src/map/bgfx/map_bgfx_hud_text_cache.cpp
-        src/map/bgfx/map_bgfx_hud_text_cache.h)
+        src/map/bgfx/map_bgfx_hud_text_cache.h
+        src/map/bgfx/map_bgfx_glyph_atlas.cpp
+        src/map/bgfx/map_bgfx_glyph_atlas.h
+        src/map/bgfx/map_bgfx_label_gpu.cpp
+        src/map/bgfx/map_bgfx_label_gpu.h)
     add_library(AOWIS::RenderCore ALIAS aowis-render-core)
     target_compile_features(aowis-render-core PUBLIC cxx_std_20)
     target_include_directories(aowis-render-core PUBLIC

@@ -1,23 +1,26 @@
 #include "map/bgfx/map_bgfx_2d_snapshot_adapter.h"
 #include "map/bgfx/map_bgfx_labels.h"
 #include "map/bgfx/map_bgfx_hud_canvas.h"
+#include "map/bgfx/map_bgfx_glyph_atlas.h"
 #include "map/bgfx/map_bgfx_hud_text_cache.h"
 #include "map/bgfx/map_bgfx_pan_reuse.h"
 #include "map/render/map_retained_network_scene.h"
 
 #include <QFont>
 #include <QFontMetricsF>
+#include <QHash>
 #include <QGuiApplication>
 #include <QLocale>
 #include <QVector>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
 // Map labels on the bgfx 2D map without a GPU: which labels the decluttered
 // placement keeps, where they go around their symbols, priorities, values,
-// the move preview, viewport edges, the rasterization budget and stability
-// while panning.
+// the move preview, viewport edges, the glyph budget, the distance atlas,
+// the fade-in and stability while panning.
 namespace
 {
 int fails = 0;
@@ -108,7 +111,7 @@ struct Harness
     MapBgfx2dScene scene;
     NetworkRenderSnapshot snapshot;
     MapBgfxLabels labels;
-    MapBgfxHudTextCache cache{2048};
+    MapBgfxGlyphAtlas glyphs{1024};
     MapBgfxHudCanvas canvas;
     MapLabelSettings settings;
     // Dense by render id, NaN: no value (MapNetworkRenderSymbology).
@@ -118,6 +121,9 @@ struct Harness
     MapBgfxLabelValueFormat link_format;
     QSet<quint64> hidden;
     QFont font;
+    double ratio = 1.0;
+    // < 0: no fade-in (MapBgfxLabels::Inputs::time_s).
+    double time_s = -1.0;
 
     Harness()
     {
@@ -153,7 +159,9 @@ struct Harness
         inputs.node_symbol = nodeSymbol;
         inputs.link_symbol = linkSymbol;
         inputs.font = this->font;
-        return this->labels.build(&this->canvas, &this->cache, inputs);
+        inputs.device_pixel_ratio = this->ratio;
+        inputs.time_s = this->time_s;
+        return this->labels.build(&this->canvas, &this->glyphs, inputs);
     }
     const MapBgfxLabels::Placed *find(const QString &text) const
     {
@@ -190,8 +198,9 @@ void testNodeAndLinkPlacement()
     const MapBgfx2d::Camera view = camera();
     req(harness.build(view), "labels: everything drawn in one build");
     req(harness.labels.stats().placed == 3, "labels: two nodes and one pipe placed");
-    req(harness.labels.stats().drawn == 3, "labels: three label sprites drawn");
-    req(harness.canvas.vertices().size() == 12, "labels: one quad per label");
+    req(harness.labels.stats().drawn == 3, "labels: three labels drawn");
+    // "J-1", "J-2", "P-1": nine visible glyphs.
+    req(harness.canvas.vertices().size() == 36, "labels: one quad per glyph");
 
     const MapBgfxHudPoint j1 = project(view, 8.9990, 47.0);
     const MapBgfxLabels::Placed *label_j1 = harness.find("J-1");
@@ -451,13 +460,17 @@ void testBudgetAndStability()
     }
     harness.prepare();
     const MapBgfx2d::Camera view = camera();
+    // "N1".."N400": eleven distinct glyphs; three new distance fields per
+    // build, so the first builds defer labels and later ones complete.
+    harness.labels.setGlyphBudget(3);
     const bool complete = harness.build(view);
     const int placed = harness.labels.stats().placed;
-    req(placed > MapBgfxLabels::MaximumRasterizationsPerBuild,
-        "budget: more labels placed than one build rasterizes");
-    req(!complete && harness.labels.stats().deferred
-                         == placed - MapBgfxLabels::MaximumRasterizationsPerBuild,
-        "budget: the rest is deferred");
+    req(placed > 100, "budget: a dense grid of labels placed");
+    req(!complete && harness.labels.stats().deferred > 0
+            && harness.labels.stats().glyphs_created <= 3,
+        "budget: missing glyphs defer labels, at most the budget is created");
+    req(harness.labels.stats().drawn + harness.labels.stats().deferred == placed,
+        "budget: every placed label is drawn or deferred");
     req(harness.placedOverlapFree(), "budget: no overlaps in a dense grid");
     // Builds until complete, the first one included.
     int builds = 1;
@@ -465,12 +478,20 @@ void testBudgetAndStability()
     while (!done && builds < 10)
     {
         done = harness.build(view);
+        req(harness.labels.stats().glyphs_created <= 3, "budget: never more than the budget");
         ++builds;
     }
-    req(harness.labels.stats().deferred == 0 && harness.labels.stats().drawn == placed,
+    req(done && harness.labels.stats().deferred == 0 && harness.labels.stats().drawn == placed,
         "budget: later builds draw everything");
-    req(builds == int(std::ceil(double(placed) / MapBgfxLabels::MaximumRasterizationsPerBuild)),
-        "budget: one batch of rasterizations per build");
+    // The placed labels use at most "N" and the ten digits.
+    const int glyph_count = harness.glyphs.glyphCount();
+    req(glyph_count > 3 && glyph_count <= 11, "budget: one atlas entry per distinct glyph");
+    req(builds == (glyph_count + 2) / 3, "budget: the glyphs in batches of three");
+    // New texts from known glyphs (values of a time step) need no budget.
+    harness.snapshot.nodes.last().id = QStringLiteral("N10101");
+    harness.prepare();
+    req(harness.build(view) && harness.labels.stats().glyphs_created == 0,
+        "budget: new texts of known glyphs cost no distance field");
 
     // Panning by whole pixels keeps every label relative to the network.
     QHash<QString, MapBgfxHudRect> before;
@@ -519,7 +540,7 @@ void testPanReuse()
     harness.prepare();
     const QSizeF viewport(ViewportWidth, ViewportHeight);
     const double ratio = 1.25;
-    harness.cache.setDevicePixelRatio(ratio);
+    harness.ratio = ratio;
     MapBgfxPanReuse pan;
     const MapBgfx2d::Camera start = camera();
 
@@ -604,19 +625,22 @@ void testPanReuse()
         "pan reuse: screen-anchored content gets no margin");
 }
 
-void testAtlasLimit()
+void testAtlasRefill()
 {
-    // A small atlas holds only a few labels: placement stops before the
-    // frame would overflow it, so nothing is ever evicted mid-frame.
+    // A tiny atlas cannot hold one frame's glyphs: what does not fit is
+    // deferred, the full atlas is cleared at the start of the next build (never
+    // while quads refer to it) and every placed label is drawn or deferred.
     Harness harness;
-    for (quint32 index = 1; index <= 60; ++index)
+    const QString letters = QStringLiteral("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    for (quint32 index = 1; index <= 26; ++index)
     {
-        harness.snapshot.nodes.append(node(index, QStringLiteral("LONG-JUNCTION-NAME-%1").arg(int(index)),
+        harness.snapshot.nodes.append(node(index, letters.mid(int(index) - 1, 1) + letters.mid(int(26 - index), 1),
                                            InfrastructureEntity::Junction,
-                                           8.9990, 46.9985 + 0.00005 * double(index)));
+                                           8.9975 + 0.0002 * double(index % 13),
+                                           46.9988 + 0.0004 * double(index / 13)));
     }
     harness.prepare();
-    MapBgfxHudTextCache small{256};
+    MapBgfxGlyphAtlas tiny{128};
     MapBgfxLabels labels;
     MapBgfxHudCanvas canvas;
     MapBgfxLabels::Inputs inputs;
@@ -628,17 +652,145 @@ void testAtlasLimit()
     inputs.node_symbol = nodeSymbol;
     inputs.link_symbol = linkSymbol;
     inputs.font = harness.font;
-    labels.build(&canvas, &small, inputs);
-    double footprint = 0.0;
-    for (const MapBgfxLabels::Placed &placed : labels.placed())
-        footprint += small.haloTextFootprint(QSizeF(placed.box.width, placed.box.height),
-                                             MapBgfxLabels::HaloPx);
-    req(labels.stats().placed > 0, "atlas: some labels placed");
-    req(labels.stats().placed < labels.stats().candidates, "atlas: placement capped");
-    req(footprint <= MapBgfxLabels::AtlasFillLimit * small.capacity(),
-        "atlas: the frame's labels fit into the atlas");
-    req(!small.evictedSinceFrameStart(), "atlas: no eviction while drawing");
-    req(labels.stats().drawn == labels.stats().placed, "atlas: every placed label drawn");
+    const quint64 generation = tiny.generation();
+    for (int build = 0; build < 6; ++build)
+    {
+        labels.build(&canvas, &tiny, inputs);
+        req(labels.stats().drawn + labels.stats().deferred == labels.stats().placed,
+            "atlas: every placed label is drawn or deferred");
+        bool inside = true;
+        for (const MapBgfxHudVertex &vertex : canvas.vertices())
+            inside = inside && vertex.u >= 0.0f && vertex.u <= 1.0f && vertex.v >= 0.0f && vertex.v <= 1.0f;
+        req(inside, "atlas: quads sample inside the atlas");
+    }
+    req(labels.stats().placed > 0 && labels.stats().drawn > 0, "atlas: labels drawn from a tiny atlas");
+    req(tiny.generation() > generation, "atlas: a full atlas is cleared and refilled");
+    req(labels.stats().deferred > 0, "atlas: what does not fit is deferred");
+}
+
+void testGlyphAtlas()
+{
+    MapBgfxGlyphAtlas atlas{512};
+    QFont font;
+    font.setPixelSize(11);
+    const QVector<MapBgfxGlyphAtlas::LineGlyph> line = atlas.layoutLine(QStringLiteral("IO"), font);
+    req(line.size() == 2, "atlas: one glyph per character");
+    if (line.size() != 2)
+        return;
+    req(std::fabs(line.at(0).scale - 11.0 / MapBgfxGlyphAtlas::BasePixelSize) < 1e-9,
+        "atlas: base px to logical px scale");
+    req(line.at(1).pen.x() > line.at(0).pen.x(), "atlas: pens advance along the line");
+    req(!atlas.contains(line.at(0).key) && !atlas.glyph(line.at(0).key, false).valid,
+        "atlas: lookup without creation finds nothing");
+    const MapBgfxGlyphAtlas::Glyph i_glyph = atlas.glyph(line.at(0).key, true);
+    req(i_glyph.valid && !i_glyph.empty && atlas.contains(line.at(0).key), "atlas: distance field created");
+    req(i_glyph.x1 - i_glyph.x0 > 2.0 * MapBgfxGlyphAtlas::SpreadPx && i_glyph.y0 < 0.0 && i_glyph.y1 > 0.0,
+        "atlas: quad covers the glyph and its spread around the baseline");
+    // Whitespace (if the layout emits a glyph for it at all) draws nothing.
+    const QVector<MapBgfxGlyphAtlas::LineGlyph> spaced = atlas.layoutLine(QStringLiteral(" "), font);
+    for (const MapBgfxGlyphAtlas::LineGlyph &space_glyph : spaced)
+    {
+        const MapBgfxGlyphAtlas::Glyph space = atlas.glyph(space_glyph.key, true);
+        req(space.valid && space.empty, "atlas: whitespace draws nothing");
+    }
+    // Inside the stem of the I: well above the outline value; the corner of
+    // the entry (spread only): well below.
+    const QImage &image = atlas.atlas();
+    const int x0 = int(std::lround(double(i_glyph.u0) * image.width()));
+    const int y0 = int(std::lround(double(i_glyph.v0) * image.height()));
+    const int x1 = int(std::lround(double(i_glyph.u1) * image.width()));
+    const int y1 = int(std::lround(double(i_glyph.v1) * image.height()));
+    req(x1 - x0 == int(i_glyph.x1 - i_glyph.x0) && y1 - y0 == int(i_glyph.y1 - i_glyph.y0),
+        "atlas: one texel per base pixel");
+    // Encoded distance: 128 is the outline, 16 per base px inside. The stem
+    // of a regular-weight I is only a few base px wide, so the brightest
+    // texel of the middle row is what tells inside from outside (the row's
+    // exact centre may sit a texel off the stem's middle).
+    const uchar *middle_row = image.constScanLine((y0 + y1) / 2);
+    int inside_peak = 0;
+    for (int x = x0; x < x1; ++x)
+        inside_peak = std::max(inside_peak, int(middle_row[x]));
+    const int corner = image.constScanLine(y0)[x0];
+    if (inside_peak <= 136 || corner >= 40)
+        std::printf("atlas: I entry %dx%d texels, middle-row peak %d, corner %d\n",
+                    x1 - x0, y1 - y0, inside_peak, corner);
+    req(inside_peak > 136, "atlas: inside the glyph is above the outline value");
+    req(corner < 40, "atlas: the spread margin is far outside");
+    req(atlas.dirty() && atlas.dirtyRect().contains(QPoint(x0, y0)), "atlas: new entry marked for upload");
+
+    // The pixel size is not part of the key: every size shares the entry.
+    const int count = atlas.glyphCount();
+    QFont large = font;
+    large.setPixelSize(40);
+    const QVector<MapBgfxGlyphAtlas::LineGlyph> large_line = atlas.layoutLine(QStringLiteral("I"), large);
+    req(large_line.size() == 1 && large_line.at(0).key == line.at(0).key
+            && std::fabs(large_line.at(0).scale - 40.0 / MapBgfxGlyphAtlas::BasePixelSize) < 1e-9,
+        "atlas: one entry for every size, scaled");
+    atlas.glyph(large_line.at(0).key, true);
+    req(atlas.glyphCount() == count, "atlas: no second entry for another size");
+
+    // emitLine(): nothing until every glyph exists, then one quad per glyph,
+    // scaled as a whole (a camera zoom of the Projects graph).
+    MapBgfxGlyphAtlas fresh{512};
+    MapBgfxHudCanvas line_canvas;
+    int no_budget = 0;
+    req(!fresh.emitLine(&line_canvas, QStringLiteral("AB"), font, 10.0, 20.0, 1.0, 0xff000000u, &no_budget)
+            && line_canvas.vertices().isEmpty(),
+        "emitLine: missing glyphs without budget emit nothing");
+    int budget = 8;
+    req(fresh.emitLine(&line_canvas, QStringLiteral("AB"), font, 10.0, 20.0, 1.0, 0xff000000u, &budget)
+            && line_canvas.vertices().size() == 8 && budget == 6,
+        "emitLine: two glyphs created, two quads");
+    const double width_1x = line_canvas.vertices().at(1).x - line_canvas.vertices().at(0).x;
+    line_canvas.clear();
+    req(fresh.emitLine(&line_canvas, QStringLiteral("AB"), font, 10.0, 20.0, 2.0, 0xff000000u, nullptr),
+        "emitLine: known glyphs need no budget");
+    const double width_2x = line_canvas.vertices().at(1).x - line_canvas.vertices().at(0).x;
+    req(std::fabs(width_2x - 2.0 * width_1x) < 1e-3, "emitLine: quads scale with the zoom");
+}
+
+void testFadeIn()
+{
+    Harness harness;
+    harness.snapshot.nodes.append(node(1, "F-1", InfrastructureEntity::Junction, 8.9990, 47.0));
+    harness.snapshot.nodes.append(node(2, "F-2", InfrastructureEntity::Junction, 9.0010, 47.0));
+    harness.prepare();
+    const MapBgfx2d::Camera view = camera();
+    const quint64 key_f2 = MapBgfx2dScene::entityKey(InfrastructureEntity::Junction, 2);
+    harness.time_s = 10.0;
+    req(!harness.build(view) && harness.labels.stats().fading, "fade: new labels fade in");
+    req(!harness.canvas.vertices().isEmpty()
+            && (harness.canvas.vertices().first().abgr >> 24) == 0u,
+        "fade: transparent when they appear");
+    harness.time_s = 10.0 + 0.5 * MapBgfxLabels::FadeInSeconds;
+    req(!harness.build(view), "fade: still fading half way");
+    const quint32 half = harness.canvas.vertices().first().abgr >> 24;
+    req(half > 100u && half < 155u, "fade: half opaque half way");
+    harness.time_s = 10.0 + 2.0 * MapBgfxLabels::FadeInSeconds;
+    req(harness.build(view) && !harness.labels.stats().fading, "fade: done, nothing more to build");
+    req((harness.canvas.vertices().first().abgr >> 24) == 255u, "fade: opaque when done");
+    // A label that was gone fades in again; the others stay opaque.
+    harness.hidden.insert(key_f2);
+    harness.time_s += 1.0;
+    req(harness.build(view) && harness.labels.stats().drawn == 1, "fade: hidden label not drawn");
+    harness.hidden.clear();
+    harness.time_s += 1.0;
+    req(!harness.build(view) && harness.labels.stats().fading, "fade: a returning label fades in");
+    int opaque = 0;
+    int transparent = 0;
+    for (const MapBgfxHudVertex &vertex : harness.canvas.vertices())
+    {
+        if ((vertex.abgr >> 24) == 255u)
+            ++opaque;
+        else if ((vertex.abgr >> 24) == 0u)
+            ++transparent;
+    }
+    req(opaque == 12 && transparent == 12, "fade: only the returning label is transparent");
+    // No clock: no fading at all.
+    Harness still;
+    still.snapshot = harness.snapshot;
+    still.prepare();
+    req(still.build(view) && !still.labels.stats().fading, "fade: off without a clock");
 }
 
 void testHaloSprite()
@@ -691,7 +843,9 @@ int main(int argc, char **argv)
     testHiddenAndViewport();
     testBudgetAndStability();
     testPanReuse();
-    testAtlasLimit();
+    testAtlasRefill();
+    testGlyphAtlas();
+    testFadeIn();
     testHaloSprite();
 
     if (fails == 0)

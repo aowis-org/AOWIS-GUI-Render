@@ -34,7 +34,7 @@ set(AOWIS_BGFX_SHADER_NAMES
     vs_icon_2d fs_icon_2d vs_flow_2d fs_flow_2d
     vs_imagery_2d fs_imagery_2d
     fs_heatmap_2d
-    vs_hud fs_hud
+    vs_hud fs_hud fs_label_sdf
     vs_globe_surface fs_globe_surface vs_globe_wireframe fs_globe_wireframe
     vs_globe_link fs_globe_link fs_globe_link_xray vs_globe_flow
     vs_globe_node fs_globe_node vs_globe_junction fs_globe_junction fs_globe_junction_xray

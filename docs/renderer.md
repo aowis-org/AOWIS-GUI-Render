@@ -260,14 +260,25 @@ is coloured by, in the legend's unit (`MapLabelSettings`,
   a symbol and lie inside the viewport. A 48 px grid keeps each test local.
   Above 30000 on-screen nodes only tanks, reservoirs, pumps and valves are
   labelled.
-* Text: `MapBgfxHudTextCache::haloText()` rasterizes each run once as one
-  colour sprite, dark text with a white outline (`QPainterPath` stroke +
-  fill), readable over imagery and lines; node labels near black, link
-  labels dark blue. ID and value are two centred lines. The labels' own
-  2048 x 2048 atlas is created on first use; placement stops before one
-  frame's labels would exceed 70 % of it, and at most 160 new runs are
-  rasterized per frame (the rest keep their slot and appear in the next
-  frames).
+* Text: a signed-distance glyph atlas, the way game and map engines draw
+  text (`map_bgfx_glyph_atlas.*`, `map_bgfx_label_gpu.*`, `vs_hud.sc` +
+  `fs_label_sdf.sc`). Lines are shaped by `QTextLayout` (kerning, fallback,
+  RTL); every glyph, keyed by its `QRawFont` and glyph index but not its
+  pixel size, gets one 1024 x 1024 R8 atlas entry: its signed distance to
+  the outline at a 32 px base size (+-8 px range), from the outline filled
+  at 4x through an exact Euclidean distance transform. The canvas holds one
+  quad per glyph with the text colour (node labels near black, link labels
+  dark blue) and fade in the vertex tint; the shader thresholds the linearly
+  filtered distance per screen pixel for the fill and, 1.5 logical px
+  further out, the white halo (uniforms). Crisp at any zoom and device pixel
+  ratio; new values of a running simulation cost no rasterization. At most 64
+  new distance fields per build (the first frames only); a label still
+  missing one keeps its place and appears in the next build. A full atlas
+  defers the labels that do not fit and is cleared at the start of the next
+  build, never while quads refer to it. ID and value are two centred lines.
+* Fade-in: a label the previous build did not draw fades in over 0.18 s, so
+  labels revealed by zooming or panning do not pop; the view keeps building
+  frames while one fades.
 * `MapBgfxMapView::renderLabels()`: drawn after the network and the host's
   overlay, before the HUD, with the network's camera (the host's
   full-network screen translation included); rebuilt only when the camera, the viewport,

@@ -15,6 +15,7 @@
 #include "map/bgfx/map_bgfx_hud_canvas.h"
 #include "map/bgfx/map_bgfx_hud_gpu.h"
 #include "map/bgfx/map_bgfx_hud_text_cache.h"
+#include "map/bgfx/map_bgfx_label_gpu.h"
 #include "map/bgfx/map_bgfx_labels.h"
 #include "map/bgfx/map_bgfx_pan_reuse.h"
 #include "map/bgfx/map_bgfx_panorama_gpu.h"
@@ -615,18 +616,19 @@ private:
     MapBgfxHudCanvas overlay_canvas;
     MapBgfxHudGpu overlay_gpu;
     // Map labels: settings, value formats, optional symbol boxes, the
-    // builder, its atlas (created on first use: 16 MiB) and bgfx objects.
-    // The canvas is rebuilt only when label_build_key changes, labels were
-    // deferred (rasterization budget) or a pan left label_pan's margin.
+    // builder, its glyph distance atlas (created on first use: 1 MiB) and
+    // bgfx objects. The canvas is rebuilt only when label_build_key changes,
+    // labels were deferred (glyph budget) or fade in, or a pan left
+    // label_pan's margin.
     MapLabelSettings label_settings;
     MapBgfxLabelValueFormat label_node_format;
     MapBgfxLabelValueFormat label_link_format;
     MapBgfxLabels::SymbolRect label_node_symbol;
     MapBgfxLabels::SymbolRect label_link_symbol;
     MapBgfxLabels labels;
-    std::unique_ptr<MapBgfxHudTextCache> label_text_cache;
+    std::unique_ptr<MapBgfxGlyphAtlas> label_glyphs;
     MapBgfxHudCanvas label_canvas;
-    MapBgfxHudGpu label_gpu;
+    MapBgfxLabelGpu label_gpu;
     // Everything but the camera centre: pans reuse the canvas translated
     // (label_pan) while the key is unchanged.
     struct LabelBuildKey
