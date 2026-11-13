@@ -1215,11 +1215,18 @@ bool MapModel::setViewGlobeOrbitEyeAndTarget(const GeoWgs84Ellipsoid::EcefPositi
 
     const double horizontal_m = std::hypot(east_m, north_m);
     const double distance_m = std::sqrt(horizontal_m * horizontal_m + up_m * up_m);
-    if (!std::isfinite(distance_m) || !(horizontal_m > 0.0))
+    if (!std::isfinite(distance_m) || !(distance_m > 0.0))
         return false;
     // orbitCameraEyeEcefD(): eye horizontal = east*sin(yaw) - north*cos(yaw).
     const double pitch_deg = qRadiansToDegrees(std::atan2(up_m, horizontal_m));
-    const double yaw_deg = qRadiansToDegrees(std::atan2(east_m, -north_m));
+    // Straight down / up (the globe opens at pitch 90): the horizontal part
+    // is only rounding noise, its direction a random heading, which would
+    // spin the picture on the first orbit. The eye is on the vertical either
+    // way, so the current yaw keeps the picture exactly (it orients the view
+    // there). Below 1e-6 rad off the vertical the noise dominates.
+    const bool vertical = horizontal_m <= distance_m * 1e-6;
+    const double yaw_deg = vertical ? this->m_view_globe_yaw_deg
+                                    : qRadiansToDegrees(std::atan2(east_m, -north_m));
     if (pitch_deg < viewGlobeMinPitchDeg() || pitch_deg > MaxViewGlobePitchDeg
         || distance_m < MinViewGlobeDistanceM || distance_m > MaxViewGlobeDistanceM)
     {

@@ -2,6 +2,7 @@
 // injected imagery provider directory and orbit sensitivity. Checks do not
 // depend on assert(), so they also run in Release (NDEBUG) builds.
 
+#include "geo/geo_wgs84_ellipsoid.h"
 #include "map/core/map_imagery_provider_directory.h"
 #include "map/core/map_model.h"
 
@@ -218,6 +219,31 @@ void testGlobeFreeLook()
     expectTrue(model.viewGlobeCameraMode() == MapGlobeCameraMode::Orbit, "a view mode switch ends free look");
 }
 
+// Re-anchoring a straight-down view (the globe opens at pitch 90) keeps the
+// heading: its horizontal part is rounding noise, a heading taken from it
+// spun the picture on the first orbit.
+void testVerticalReanchorKeepsHeading()
+{
+    MapModel model;
+    model.setViewMode(MapViewMode::Globe, QSize(800, 600));
+    model.setViewGlobeDistanceM(5000.0);
+    model.setViewGlobePitchDeg(MapModel::MaxViewGlobePitchDeg);
+    model.setViewGlobeYawDeg(37.0);
+    const GeoWgs84Ellipsoid::EcefPositionD eye = GeoWgs84Ellipsoid::orbitCameraEyeEcefD(
+        model.centerLon(), model.centerLat(), model.viewGlobeYawDeg(), model.viewGlobePitchDeg(),
+        model.viewGlobeDistanceM(), model.viewGlobeVerticalOffsetM(), model.viewGlobeCameraCollisionLiftM());
+    const GeoWgs84Ellipsoid::EcefPositionD target = GeoWgs84Ellipsoid::geodeticToEcefD(
+        model.centerLon(), model.centerLat(), model.viewGlobeVerticalOffsetM());
+    // A pivot 500 m above the old target on the same (vertical) view ray.
+    GeoWgs84Ellipsoid::EcefPositionD pivot;
+    pivot.x = target.x + (eye.x - target.x) * 0.1;
+    pivot.y = target.y + (eye.y - target.y) * 0.1;
+    pivot.z = target.z + (eye.z - target.z) * 0.1;
+    expectTrue(model.setViewGlobeOrbitEyeAndTarget(eye, pivot), "a straight-down view re-anchors");
+    expectNear(model.viewGlobeYawDeg(), 37.0, 1e-9, "the heading is kept on the vertical");
+    expectNear(model.viewGlobeDistanceM(), 4500.0, 1e-3, "the pivot moved up the view ray");
+}
+
 int main()
 {
     testCameraRoundTrip();
@@ -225,6 +251,7 @@ int main()
     testProviderDirectory();
     testOrbitSensitivity();
     testGlobeFreeLook();
+    testVerticalReanchorKeepsHeading();
     if (g_failures != 0)
     {
         std::fprintf(stderr, "%d of %d view checks failed\n", g_failures, g_checks);
