@@ -136,7 +136,7 @@ QMatrix4x4 MapGlobeCamera::viewProjectionMatrixForOrigin(
     const int viewport_width = qMax(1, this->viewport_size.width());
     const int viewport_height = qMax(1, this->viewport_size.height());
     const double bounded_pitch_deg = qBound(
-        MapModel::MinViewGlobePitchDeg, this->pitch_deg,
+        MapModel::MinViewGlobeFreeLookPitchDeg, this->pitch_deg,
         MapModel::MaxViewGlobePitchDeg);
     const double bounded_distance_m = orbitDistanceM();
 
@@ -200,7 +200,7 @@ bool MapGlobeCamera::screenRay(
     parameters.target_lat_deg = this->target_lat_deg;
     parameters.yaw_deg = this->yaw_deg;
     parameters.pitch_deg = qBound(
-        MapModel::MinViewGlobePitchDeg, this->pitch_deg,
+        MapModel::MinViewGlobeFreeLookPitchDeg, this->pitch_deg,
         MapModel::MaxViewGlobePitchDeg);
     parameters.distance_m = orbitDistanceM();
     parameters.target_height_m = this->vertical_offset_m;

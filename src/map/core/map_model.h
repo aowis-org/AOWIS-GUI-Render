@@ -26,6 +26,18 @@ enum class MapView3dNavigationState
     Rotate
 };
 
+// How the globe camera turns. Orbit: around a target on the ground, the eye
+// always above the target's horizon (pitch 0..90, the Ctrl / middle-button
+// orbit and the HUD tilt). FreeLook: about the eye itself, FPS-style, from
+// straight down to straight up (rig pitch -90..90; the Alt look and the HUD
+// look slider), terrain following paused (no gravity, only the clearance
+// lift keeps the eye above ground). Starting an orbit returns to Orbit.
+enum class MapGlobeCameraMode
+{
+    Orbit,
+    FreeLook
+};
+
 class MapModel : public QObject
 {
     Q_OBJECT
@@ -97,6 +109,14 @@ public:
     static constexpr double DefaultViewGlobeDistanceM = MaxViewGlobeDistanceM;
     static constexpr double MinViewGlobePitchDeg = 0.0;
     static constexpr double MaxViewGlobePitchDeg = 90.0;
+    // Rig pitch floor in MapGlobeCameraMode::FreeLook: the eye straight
+    // below its target, i.e. looking straight up. Renderers clamp to this
+    // widest range; the model keeps the mode's own range
+    // (viewGlobeMinPitchDeg()).
+    static constexpr double MinViewGlobeFreeLookPitchDeg = -90.0;
+    // Free look's view angle limit at the eye, below and above the horizontal
+    // (degrees; the exact vertical has no heading).
+    static constexpr double MaxViewGlobeLookAngleDeg = 89.5;
     // Straight down (90 degrees) rather than an oblique angle: looking
     // directly along the local "up" axis at the target is the only pitch
     // that geometrically guarantees the ellipsoid renders as a symmetric
@@ -245,14 +265,28 @@ public:
     void orbitViewGlobe(double yaw_delta_deg, double pitch_delta_deg);
     void orbitViewGlobeByPointerDelta(const QPoint &delta_pixels, bool include_pitch);
     // Free look (Alt + mouse, an FPS-style look without gravity or
-    // movement): the eye stays where it is and the view direction turns
-    // about it, x = heading about the eye's local up, y = elevation (mouse
-    // up looks up). Done on the orbit rig: the target is placed the current
-    // orbit distance ahead along the new direction (setViewGlobeOrbitEyeAndTarget()),
-    // so every other navigation continues from the result unchanged. The
-    // rig cannot look above its target's horizon (MinViewGlobePitchDeg 0),
-    // so looking up stops just below the horizontal.
+    // movement): switches to MapGlobeCameraMode::FreeLook; the eye stays
+    // where it is and the view direction turns about it, x = heading about
+    // the eye's local up, y = elevation (mouse up looks up), from straight
+    // down to straight up (MaxViewGlobeLookAngleDeg). Done on the orbit
+    // rig: the target is placed the current orbit distance ahead along the
+    // new direction (setViewGlobeOrbitEyeAndTarget()), so every other
+    // navigation continues from the result.
     void lookViewGlobeByPointerDelta(const QPoint &delta_pixels);
+    // The free-look view angle below the eye's horizontal: 90 straight
+    // down, 0 horizontal, -90 straight up (the HUD look slider's value; in
+    // Orbit mode the same angle of the orbit view).
+    double viewGlobeLookDepressionDeg() const;
+    // Turns the view about the eye to that angle, heading kept (HUD look
+    // slider); switches to FreeLook.
+    void setViewGlobeLookDepressionDeg(double depression_deg);
+    MapGlobeCameraMode viewGlobeCameraMode() const { return this->m_view_globe_camera_mode; }
+    // FreeLook -> Orbit clamps the pitch to the orbit range (a view above
+    // the target's horizon tilts down to it).
+    void setViewGlobeCameraMode(MapGlobeCameraMode mode);
+    // The current mode's pitch floor: MinViewGlobePitchDeg (Orbit) or
+    // MinViewGlobeFreeLookPitchDeg (FreeLook).
+    double viewGlobeMinPitchDeg() const;
     // Re-anchors the orbit rig on target (ECEF; normally a point of the
     // current view ray) with the eye exactly at eye: the inverse of
     // GeoWgs84Ellipsoid::orbitCameraEyeEcefD(). Keeps the eye-only collision
@@ -279,6 +313,7 @@ signals:
     void view3dNavigationStateChanged(MapView3dNavigationState state);
     void view3dNetworkGroundOffsetChanged(double offset_m);
     void viewGlobeCameraChanged();
+    void viewGlobeCameraModeChanged(MapGlobeCameraMode mode);
     // Internal terrain-follow animation only. Keeping this separate prevents
     // height settling from being mistaken for user camera/zoom movement by
     // the editor/monitor synchronization layer.
@@ -296,6 +331,10 @@ private:
     double view2dWorldSizePx() const;
     void clampCenter(const QSize &viewport);
     void emitCenterChanged();
+    // Free look step: heading turned by heading_delta_rad; elevation turned
+    // by elevation_delta_rad, or set to absolute_elevation_rad when finite.
+    void lookViewGlobe(double heading_delta_rad, double elevation_delta_rad,
+                       double absolute_elevation_rad);
     // The rendered globe camera's ray through screen_position.
     bool globeScreenRay(const QPointF &screen_position, const QSize &viewport,
                         MapGlobeScreenRay *ray) const;
@@ -332,6 +371,7 @@ private:
     double m_view_globe_vertical_offset_m = 0.0;
     double m_view_globe_camera_collision_lift_m = 0.0;
     bool m_view_globe_north_up_locked = true;
+    MapGlobeCameraMode m_view_globe_camera_mode = MapGlobeCameraMode::Orbit;
 };
 
 #endif // MAP_MODEL_H

@@ -451,7 +451,7 @@ QVector<MapGlobeQuadtreeLeaf> MapGlobeSurfaceScene::selectVisibleLeaves(
         return leaves;
 
     const double pitch_deg = qBound(
-        MapModel::MinViewGlobePitchDeg,
+        MapModel::MinViewGlobeFreeLookPitchDeg,
         map_model.viewGlobePitchDeg(),
         MapModel::MaxViewGlobePitchDeg);
     const double distance_m = qMax(

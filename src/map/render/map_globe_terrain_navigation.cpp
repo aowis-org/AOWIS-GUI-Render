@@ -176,7 +176,7 @@ bool sampleTerrainTileElevationAt(const MapTerrainTile &terrain_tile, double loc
 // MapGlobeCamera), with the current vertical offset and collision lift.
 GeoWgs84Ellipsoid::EcefPositionD currentEyeEcef(const MapModel &map_model)
 {
-    const double pitch_deg = qBound(MapModel::MinViewGlobePitchDeg, map_model.viewGlobePitchDeg(),
+    const double pitch_deg = qBound(MapModel::MinViewGlobeFreeLookPitchDeg, map_model.viewGlobePitchDeg(),
                                     MapModel::MaxViewGlobePitchDeg);
     const double distance_m = qMax(MapModel::MinViewGlobeDistanceM, map_model.viewGlobeDistanceM());
     return GeoWgs84Ellipsoid::orbitCameraEyeEcefD(
@@ -548,13 +548,17 @@ void MapGlobeTerrainNavigation::syncCameraHeight(bool request_missing_tile)
 
     const QScopedValueRollback<bool> sync_guard(this->sync_active, true);
 
-    const double pitch_deg = qBound(MapModel::MinViewGlobePitchDeg, this->map_model->viewGlobePitchDeg(),
+    const double pitch_deg = qBound(MapModel::MinViewGlobeFreeLookPitchDeg, this->map_model->viewGlobePitchDeg(),
                                     MapModel::MaxViewGlobePitchDeg);
     const double distance_m = qMax(MapModel::MinViewGlobeDistanceM, this->map_model->viewGlobeDistanceM());
     const double current_offset_m = this->map_model->viewGlobeVerticalOffsetM();
     const double current_collision_lift_m = this->map_model->viewGlobeCameraCollisionLiftM();
+    // Free look has no gravity: the target (and with it the eye's height)
+    // stays where the look left it, only the clearance lift still keeps the
+    // eye above the terrain, as while orbiting.
     const bool orbit_target_frozen =
-        this->map_model->view3dNavigationState() == MapView3dNavigationState::Rotate;
+        this->map_model->view3dNavigationState() == MapView3dNavigationState::Rotate
+        || this->map_model->viewGlobeCameraMode() == MapGlobeCameraMode::FreeLook;
     const double viewport_height_px = double(qMax(1, this->viewport_size.height()));
     const double meters_per_pixel = 2.0 * distance_m
         * std::tan(qDegreesToRadians(MapModel::GlobeFieldOfViewDeg * 0.5)) / viewport_height_px;

@@ -278,8 +278,10 @@ MapBgfxMapView::MapBgfxMapView(MapModel *model, MapBgfxMapViewHost *view_host,
             return;
         }
         // Its end moves the target along the same ray to following's height
-        // (eye unchanged) and resumes ordinary following from there.
-        this->terrain_navigation.releaseOrbitAnchor();
+        // (eye unchanged) and resumes ordinary following from there. Free
+        // look keeps its target: following stays paused there (no gravity).
+        if (this->map_model->viewGlobeCameraMode() == MapGlobeCameraMode::Orbit)
+            this->terrain_navigation.releaseOrbitAnchor();
         syncGlobeCameraHeight(true);
     });
     connect(this->map_model, &MapModel::view3dVerticalExaggerationChanged, this, [this](double)

@@ -180,12 +180,51 @@ void testOrbitSensitivity()
 }
 }
 
+// Free look turns from straight down to straight up; an orbit keeps its
+// 0..90 degree tilt lock.
+void testGlobeFreeLook()
+{
+    MapModel model;
+    model.setViewMode(MapViewMode::Globe, QSize(800, 600));
+    model.setViewGlobeDistanceM(5000.0);
+    model.setViewGlobePitchDeg(30.0);
+    expectTrue(model.viewGlobeCameraMode() == MapGlobeCameraMode::Orbit, "the globe starts as an orbit");
+    model.setViewGlobePitchDeg(-20.0);
+    expectNear(model.viewGlobePitchDeg(), MapModel::MinViewGlobePitchDeg, 1e-9,
+               "an orbit cannot tilt above its target's horizon");
+
+    model.setViewGlobePitchDeg(30.0);
+    model.setViewGlobeLookDepressionDeg(-60.0);
+    expectTrue(model.viewGlobeCameraMode() == MapGlobeCameraMode::FreeLook, "looking switches to free look");
+    expectNear(model.viewGlobeLookDepressionDeg(), -60.0, 1e-4, "free look looks 60 degrees above the horizon");
+    expectTrue(model.viewGlobePitchDeg() < 0.0, "looking up puts the target above the eye");
+
+    model.setViewGlobeLookDepressionDeg(-120.0);
+    expectTrue(model.viewGlobeLookDepressionDeg() < -89.0
+                   && model.viewGlobeLookDepressionDeg() >= -MapModel::MaxViewGlobeLookAngleDeg - 1e-4,
+               "straight up is free look's limit");
+    model.setViewGlobeLookDepressionDeg(120.0);
+    expectTrue(model.viewGlobeLookDepressionDeg() > 89.0
+                   && model.viewGlobeLookDepressionDeg() <= MapModel::MaxViewGlobeLookAngleDeg + 1e-4,
+               "straight down is free look's other limit");
+
+    model.setViewGlobeLookDepressionDeg(-45.0);
+    model.setViewGlobeCameraMode(MapGlobeCameraMode::Orbit);
+    expectTrue(model.viewGlobePitchDeg() >= MapModel::MinViewGlobePitchDeg,
+               "returning to the orbit restores its tilt lock");
+
+    model.setViewGlobeLookDepressionDeg(-30.0);
+    model.setViewMode(MapViewMode::TwoD, QSize(800, 600));
+    expectTrue(model.viewGlobeCameraMode() == MapGlobeCameraMode::Orbit, "a view mode switch ends free look");
+}
+
 int main()
 {
     testCameraRoundTrip();
     testWithoutDirectory();
     testProviderDirectory();
     testOrbitSensitivity();
+    testGlobeFreeLook();
     if (g_failures != 0)
     {
         std::fprintf(stderr, "%d of %d view checks failed\n", g_failures, g_checks);

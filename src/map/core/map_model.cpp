@@ -518,7 +518,7 @@ bool MapModel::globeScreenRay(
     parameters.target_lat_deg = this->m_centerLat;
     parameters.yaw_deg = this->m_view_globe_yaw_deg;
     parameters.pitch_deg = qBound(
-        MinViewGlobePitchDeg, this->m_view_globe_pitch_deg, MaxViewGlobePitchDeg);
+        MinViewGlobeFreeLookPitchDeg, this->m_view_globe_pitch_deg, MaxViewGlobePitchDeg);
     parameters.distance_m = qMax(MinViewGlobeDistanceM, this->m_view_globe_distance_m);
     parameters.target_height_m = this->m_view_globe_vertical_offset_m;
     parameters.collision_lift_m = this->m_view_globe_camera_collision_lift_m;
@@ -826,6 +826,9 @@ void MapModel::setViewMode(MapViewMode view_mode, const QSize &viewport)
     if (this->m_view_mode == view_mode)
         return;
 
+    // A view mode switch starts the globe as an orbit again.
+    setViewGlobeCameraMode(MapGlobeCameraMode::Orbit);
+
     const MapViewMode previous_view_mode = this->m_view_mode;
     const double old_latitude = this->m_centerLat;
     const int viewport_height_px = viewport.isValid()
@@ -979,7 +982,7 @@ void MapModel::setViewGlobeYawDeg(double yaw_deg)
 void MapModel::setViewGlobePitchDeg(double pitch_deg)
 {
     const double next_pitch = qBound(
-        MinViewGlobePitchDeg, pitch_deg, MaxViewGlobePitchDeg);
+        viewGlobeMinPitchDeg(), pitch_deg, MaxViewGlobePitchDeg);
     if (coordinatesEqual(next_pitch, this->m_view_globe_pitch_deg))
         return;
 
@@ -1073,7 +1076,7 @@ void MapModel::setViewGlobeFocusAnchor(
     this->m_view_globe_vertical_offset_m = vertical_offset_m;
     this->m_view_globe_yaw_deg = normalizedYawDegrees(yaw_deg);
     this->m_view_globe_pitch_deg = qBound(
-        MinViewGlobePitchDeg, pitch_deg, MaxViewGlobePitchDeg);
+        viewGlobeMinPitchDeg(), pitch_deg, MaxViewGlobePitchDeg);
     this->m_view_globe_distance_m = qBound(
         MinViewGlobeDistanceM, distance_m, MaxViewGlobeDistanceM);
     this->m_view_globe_camera_collision_lift_m = qMax(
@@ -1100,7 +1103,7 @@ void MapModel::orbitViewGlobe(double yaw_delta_deg, double pitch_delta_deg)
 {
     const double next_yaw = normalizedYawDegrees(this->m_view_globe_yaw_deg + yaw_delta_deg);
     const double next_pitch = qBound(
-        MinViewGlobePitchDeg,
+        viewGlobeMinPitchDeg(),
         this->m_view_globe_pitch_deg + pitch_delta_deg,
         MaxViewGlobePitchDeg);
 
@@ -1125,6 +1128,21 @@ void MapModel::orbitViewGlobeByPointerDelta(const QPoint &delta_pixels, bool inc
     const double sensitivity = this->m_orbit_sensitivity_source
         ? this->m_orbit_sensitivity_source()
         : 1.0;
+    // In free look the pointer-driven turns (HUD compass drag, joystick)
+    // turn the view about the eye as well; Ctrl / middle-button orbits
+    // switch to Orbit before their first delta.
+    if (this->m_view_globe_camera_mode == MapGlobeCameraMode::FreeLook)
+    {
+        if (this->m_view_mode != MapViewMode::Globe || this->m_eye_pose || delta_pixels.isNull())
+            return;
+        lookViewGlobe(
+            qDegreesToRadians(double(delta_pixels.x()) * ViewGlobeLookDegreesPerPixel * sensitivity),
+            include_pitch
+                ? -qDegreesToRadians(double(delta_pixels.y()) * ViewGlobeLookDegreesPerPixel * sensitivity)
+                : 0.0,
+            std::numeric_limits<double>::quiet_NaN());
+        return;
+    }
     const double yaw_delta_deg =
         double(delta_pixels.x()) * ViewGlobeOrbitYawDegreesPerPixel * sensitivity;
     const double pitch_delta_deg = include_pitch
@@ -1167,12 +1185,9 @@ double dot3(const double a[3], const double b[3])
 }
 
 // Smallest WGS84 radius of curvature (meridional, at the equator:
-// a * (1 - e^2)). The normal of a point `d` ahead is turned about d / R
+// a * (1 - e^2)). The normal of a point `d` ahead is turned up to d / R
 // against the eye's; the smallest R gives the safe bound.
 constexpr double MinimumWgs84CurvatureRadiusM = 6335439.0;
-// Free look stays this far inside the rig's limits (no clamp at the edges).
-constexpr double ViewGlobeLookLimitMarginDeg = 0.05;
-constexpr double ViewGlobeLookMinimumElevationDeg = -89.5;
 }
 
 bool MapModel::setViewGlobeOrbitEyeAndTarget(const GeoWgs84Ellipsoid::EcefPositionD &eye,
@@ -1205,7 +1220,7 @@ bool MapModel::setViewGlobeOrbitEyeAndTarget(const GeoWgs84Ellipsoid::EcefPositi
     // orbitCameraEyeEcefD(): eye horizontal = east*sin(yaw) - north*cos(yaw).
     const double pitch_deg = qRadiansToDegrees(std::atan2(up_m, horizontal_m));
     const double yaw_deg = qRadiansToDegrees(std::atan2(east_m, -north_m));
-    if (pitch_deg < MinViewGlobePitchDeg || pitch_deg > MaxViewGlobePitchDeg
+    if (pitch_deg < viewGlobeMinPitchDeg() || pitch_deg > MaxViewGlobePitchDeg
         || distance_m < MinViewGlobeDistanceM || distance_m > MaxViewGlobeDistanceM)
     {
         return false;
@@ -1222,11 +1237,69 @@ void MapModel::lookViewGlobeByPointerDelta(const QPoint &delta_pixels)
 {
     if (this->m_view_mode != MapViewMode::Globe || this->m_eye_pose || delta_pixels.isNull())
         return;
-
     const double sensitivity = this->m_orbit_sensitivity_source
         ? this->m_orbit_sensitivity_source()
         : 1.0;
-    const double pitch_deg = qBound(MinViewGlobePitchDeg, this->m_view_globe_pitch_deg,
+    lookViewGlobe(
+        qDegreesToRadians(double(delta_pixels.x()) * ViewGlobeLookDegreesPerPixel * sensitivity),
+        -qDegreesToRadians(double(delta_pixels.y()) * ViewGlobeLookDegreesPerPixel * sensitivity),
+        std::numeric_limits<double>::quiet_NaN());
+}
+
+void MapModel::setViewGlobeLookDepressionDeg(double depression_deg)
+{
+    if (this->m_view_mode != MapViewMode::Globe || this->m_eye_pose || !std::isfinite(depression_deg))
+        return;
+    lookViewGlobe(0.0, 0.0, -qDegreesToRadians(depression_deg));
+}
+
+double MapModel::viewGlobeLookDepressionDeg() const
+{
+    const double pitch_deg = qBound(viewGlobeMinPitchDeg(), this->m_view_globe_pitch_deg,
+                                    MaxViewGlobePitchDeg);
+    const double distance_m = qMax(MinViewGlobeDistanceM, this->m_view_globe_distance_m);
+    const GeoWgs84Ellipsoid::EcefPositionD eye = GeoWgs84Ellipsoid::orbitCameraEyeEcefD(
+        this->m_centerLon, this->m_centerLat, this->m_view_globe_yaw_deg, pitch_deg, distance_m,
+        this->m_view_globe_vertical_offset_m, this->m_view_globe_camera_collision_lift_m);
+    const GeoWgs84Ellipsoid::EcefPositionD target = GeoWgs84Ellipsoid::geodeticToEcefD(
+        this->m_centerLon, this->m_centerLat, this->m_view_globe_vertical_offset_m);
+    const double forward[3] = {target.x - eye.x, target.y - eye.y, target.z - eye.z};
+    const double length = std::sqrt(dot3(forward, forward));
+    double eye_lon_deg = 0.0;
+    double eye_lat_deg = 0.0;
+    if (!(length > 0.0) || !GeoWgs84Ellipsoid::ecefToGeodetic(eye, &eye_lon_deg, &eye_lat_deg))
+        return pitch_deg;
+    const LocalEnuD frame = localEnuAt(eye_lon_deg, eye_lat_deg);
+    return -qRadiansToDegrees(std::asin(qBound(-1.0, dot3(forward, frame.up) / length, 1.0)));
+}
+
+double MapModel::viewGlobeMinPitchDeg() const
+{
+    return this->m_view_globe_camera_mode == MapGlobeCameraMode::FreeLook
+        ? MinViewGlobeFreeLookPitchDeg
+        : MinViewGlobePitchDeg;
+}
+
+void MapModel::setViewGlobeCameraMode(MapGlobeCameraMode mode)
+{
+    if (this->m_view_globe_camera_mode == mode)
+        return;
+    this->m_view_globe_camera_mode = mode;
+    // Orbit keeps the eye above its target's horizon: a free-look view
+    // above that tilts down to it (the orbit's 0..90 degree lock).
+    if (mode == MapGlobeCameraMode::Orbit && this->m_view_globe_pitch_deg < MinViewGlobePitchDeg)
+    {
+        this->m_view_globe_pitch_deg = MinViewGlobePitchDeg;
+        emit viewGlobeCameraChanged();
+    }
+    emit viewGlobeCameraModeChanged(mode);
+}
+
+void MapModel::lookViewGlobe(double heading_delta_rad, double elevation_delta_rad,
+                             double absolute_elevation_rad)
+{
+    // The current rig, clamped like the renderer (both modes' range).
+    const double pitch_deg = qBound(MinViewGlobeFreeLookPitchDeg, this->m_view_globe_pitch_deg,
                                     MaxViewGlobePitchDeg);
     const double distance_m = qMax(MinViewGlobeDistanceM, this->m_view_globe_distance_m);
     const GeoWgs84Ellipsoid::EcefPositionD eye = GeoWgs84Ellipsoid::orbitCameraEyeEcefD(
@@ -1252,26 +1325,19 @@ void MapModel::lookViewGlobeByPointerDelta(const QPoint &delta_pixels)
         return;
     const LocalEnuD frame = localEnuAt(eye_lon_deg, eye_lat_deg);
     const double heading_rad = std::atan2(dot3(forward, frame.east), dot3(forward, frame.north))
-        + qDegreesToRadians(double(delta_pixels.x()) * ViewGlobeLookDegreesPerPixel * sensitivity);
-    double elevation_rad = std::asin(qBound(-1.0, dot3(forward, frame.up), 1.0))
-        - qDegreesToRadians(double(delta_pixels.y()) * ViewGlobeLookDegreesPerPixel * sensitivity);
+        + heading_delta_rad;
+    double elevation_rad = std::isfinite(absolute_elevation_rad)
+        ? absolute_elevation_rad
+        : std::asin(qBound(-1.0, dot3(forward, frame.up), 1.0)) + elevation_delta_rad;
 
-    // The eye must stay above the horizon plane of the target `distance_m`
-    // ahead (rig pitch >= 0). That plane is turned by the angle between the
-    // two normals, at most d / R, so the view must point at least that far
-    // below the eye's horizontal. (Far out, past about 89 degrees, this pins
-    // the view to the minimum elevation: free look is a close-range tool.)
-    // The eye-only collision lift is not part of the rig's pitch: the rig's
-    // own eye sits that much lower, so the target's height below the eye,
-    // d * sin(-elevation), must exceed the lift as well.
-    const double lift_ratio =
-        qMin(1.0, qMax(0.0, this->m_view_globe_camera_collision_lift_m) / distance_m);
-    const double maximum_elevation_rad = -std::asin(lift_ratio)
-        - distance_m / MinimumWgs84CurvatureRadiusM
-        - qDegreesToRadians(ViewGlobeLookLimitMarginDeg);
-    const double minimum_elevation_rad = qDegreesToRadians(ViewGlobeLookMinimumElevationDeg);
-    elevation_rad = qMax(minimum_elevation_rad,
-                         qMin(elevation_rad, qMax(minimum_elevation_rad, maximum_elevation_rad)));
+    // Straight down to straight up, short of the exact vertical (no heading
+    // there). The target `distance_m` ahead has its own up, turned by up to
+    // d / R against the eye's: near the vertical the rig's yaw would flip
+    // (the picture would turn upside down), so that angle comes off twice.
+    const double limit_rad = qMax(
+        0.0, qDegreesToRadians(MaxViewGlobeLookAngleDeg)
+                 - 2.0 * distance_m / MinimumWgs84CurvatureRadiusM);
+    elevation_rad = qBound(-limit_rad, elevation_rad, limit_rad);
 
     const double horizontal = std::cos(elevation_rad);
     const double direction[3] = {
@@ -1286,9 +1352,12 @@ void MapModel::lookViewGlobeByPointerDelta(const QPoint &delta_pixels)
     next_target.y = eye.y + direction[1] * distance_m;
     next_target.z = eye.z + direction[2] * distance_m;
 
+    // Free look's own pitch range from here on (looking above the horizon
+    // puts the target above the eye: negative rig pitch).
+    setViewGlobeCameraMode(MapGlobeCameraMode::FreeLook);
     // A deliberate heading change leaves north-up, as an orbit yaw does.
     const bool north_up_locked = this->m_view_globe_north_up_locked;
-    if (delta_pixels.x() != 0)
+    if (heading_delta_rad != 0.0)
         this->m_view_globe_north_up_locked = false;
     if (!setViewGlobeOrbitEyeAndTarget(eye, next_target))
         this->m_view_globe_north_up_locked = north_up_locked;
