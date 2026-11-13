@@ -1133,6 +1133,167 @@ void MapModel::orbitViewGlobeByPointerDelta(const QPoint &delta_pixels, bool inc
     orbitViewGlobe(yaw_delta_deg, pitch_delta_deg);
 }
 
+namespace
+{
+// GeographicLib's local frame at a geodetic point (the rotation columns of
+// GeoWgs84Ellipsoid::orbitCameraEyeEcefD()): east, north, ellipsoid normal.
+struct LocalEnuD
+{
+    double east[3] = {0.0, 0.0, 0.0};
+    double north[3] = {0.0, 0.0, 0.0};
+    double up[3] = {0.0, 0.0, 0.0};
+};
+
+LocalEnuD localEnuAt(double lon_deg, double lat_deg)
+{
+    const double lon_rad = qDegreesToRadians(lon_deg);
+    const double lat_rad = qDegreesToRadians(lat_deg);
+    LocalEnuD frame;
+    frame.east[0] = -std::sin(lon_rad);
+    frame.east[1] = std::cos(lon_rad);
+    frame.east[2] = 0.0;
+    frame.north[0] = -std::sin(lat_rad) * std::cos(lon_rad);
+    frame.north[1] = -std::sin(lat_rad) * std::sin(lon_rad);
+    frame.north[2] = std::cos(lat_rad);
+    frame.up[0] = std::cos(lat_rad) * std::cos(lon_rad);
+    frame.up[1] = std::cos(lat_rad) * std::sin(lon_rad);
+    frame.up[2] = std::sin(lat_rad);
+    return frame;
+}
+
+double dot3(const double a[3], const double b[3])
+{
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+// Smallest WGS84 radius of curvature (meridional, at the equator:
+// a * (1 - e^2)). The normal of a point `d` ahead is turned about d / R
+// against the eye's; the smallest R gives the safe bound.
+constexpr double MinimumWgs84CurvatureRadiusM = 6335439.0;
+// Free look stays this far inside the rig's limits (no clamp at the edges).
+constexpr double ViewGlobeLookLimitMarginDeg = 0.05;
+constexpr double ViewGlobeLookMinimumElevationDeg = -89.5;
+}
+
+bool MapModel::setViewGlobeOrbitEyeAndTarget(const GeoWgs84Ellipsoid::EcefPositionD &eye,
+                                             const GeoWgs84Ellipsoid::EcefPositionD &target)
+{
+    if (this->m_view_mode != MapViewMode::Globe || this->m_eye_pose)
+        return false;
+
+    double lon_deg = 0.0;
+    double lat_deg = 0.0;
+    double height_m = 0.0;
+    if (!GeoWgs84Ellipsoid::ecefToGeodetic(target, &lon_deg, &lat_deg, &height_m))
+        return false;
+    const LocalEnuD frame = localEnuAt(lon_deg, lat_deg);
+
+    // Eye relative to the target, without the eye-only lift.
+    const double lift_m = qMax(0.0, this->m_view_globe_camera_collision_lift_m);
+    const double relative[3] = {
+        eye.x - target.x - frame.up[0] * lift_m,
+        eye.y - target.y - frame.up[1] * lift_m,
+        eye.z - target.z - frame.up[2] * lift_m};
+    const double east_m = dot3(relative, frame.east);
+    const double north_m = dot3(relative, frame.north);
+    const double up_m = dot3(relative, frame.up);
+
+    const double horizontal_m = std::hypot(east_m, north_m);
+    const double distance_m = std::sqrt(horizontal_m * horizontal_m + up_m * up_m);
+    if (!std::isfinite(distance_m) || !(horizontal_m > 0.0))
+        return false;
+    // orbitCameraEyeEcefD(): eye horizontal = east*sin(yaw) - north*cos(yaw).
+    const double pitch_deg = qRadiansToDegrees(std::atan2(up_m, horizontal_m));
+    const double yaw_deg = qRadiansToDegrees(std::atan2(east_m, -north_m));
+    if (pitch_deg < MinViewGlobePitchDeg || pitch_deg > MaxViewGlobePitchDeg
+        || distance_m < MinViewGlobeDistanceM || distance_m > MaxViewGlobeDistanceM)
+    {
+        return false;
+    }
+
+    // No viewport: the anchor is a point on the drawn globe, no 2D extent
+    // clamp may move it.
+    setViewGlobeFocusAnchor(lon_deg, lat_deg, height_m, yaw_deg, pitch_deg, distance_m,
+                            lift_m, QSize());
+    return true;
+}
+
+void MapModel::lookViewGlobeByPointerDelta(const QPoint &delta_pixels)
+{
+    if (this->m_view_mode != MapViewMode::Globe || this->m_eye_pose || delta_pixels.isNull())
+        return;
+
+    const double sensitivity = this->m_orbit_sensitivity_source
+        ? this->m_orbit_sensitivity_source()
+        : 1.0;
+    const double pitch_deg = qBound(MinViewGlobePitchDeg, this->m_view_globe_pitch_deg,
+                                    MaxViewGlobePitchDeg);
+    const double distance_m = qMax(MinViewGlobeDistanceM, this->m_view_globe_distance_m);
+    const GeoWgs84Ellipsoid::EcefPositionD eye = GeoWgs84Ellipsoid::orbitCameraEyeEcefD(
+        this->m_centerLon, this->m_centerLat, this->m_view_globe_yaw_deg, pitch_deg, distance_m,
+        this->m_view_globe_vertical_offset_m, this->m_view_globe_camera_collision_lift_m);
+    const GeoWgs84Ellipsoid::EcefPositionD target = GeoWgs84Ellipsoid::geodeticToEcefD(
+        this->m_centerLon, this->m_centerLat, this->m_view_globe_vertical_offset_m);
+
+    const double forward_length = std::sqrt(
+        (target.x - eye.x) * (target.x - eye.x) + (target.y - eye.y) * (target.y - eye.y)
+        + (target.z - eye.z) * (target.z - eye.z));
+    if (!(forward_length > 0.0))
+        return;
+    const double forward[3] = {(target.x - eye.x) / forward_length,
+                               (target.y - eye.y) / forward_length,
+                               (target.z - eye.z) / forward_length};
+
+    // Heading/elevation of the view in the EYE's local frame: turning about
+    // the eye's own up keeps the horizon level, as in an FPS look.
+    double eye_lon_deg = 0.0;
+    double eye_lat_deg = 0.0;
+    if (!GeoWgs84Ellipsoid::ecefToGeodetic(eye, &eye_lon_deg, &eye_lat_deg))
+        return;
+    const LocalEnuD frame = localEnuAt(eye_lon_deg, eye_lat_deg);
+    const double heading_rad = std::atan2(dot3(forward, frame.east), dot3(forward, frame.north))
+        + qDegreesToRadians(double(delta_pixels.x()) * ViewGlobeLookDegreesPerPixel * sensitivity);
+    double elevation_rad = std::asin(qBound(-1.0, dot3(forward, frame.up), 1.0))
+        - qDegreesToRadians(double(delta_pixels.y()) * ViewGlobeLookDegreesPerPixel * sensitivity);
+
+    // The eye must stay above the horizon plane of the target `distance_m`
+    // ahead (rig pitch >= 0). That plane is turned by the angle between the
+    // two normals, at most d / R, so the view must point at least that far
+    // below the eye's horizontal. (Far out, past about 89 degrees, this pins
+    // the view to the minimum elevation: free look is a close-range tool.)
+    // The eye-only collision lift is not part of the rig's pitch: the rig's
+    // own eye sits that much lower, so the target's height below the eye,
+    // d * sin(-elevation), must exceed the lift as well.
+    const double lift_ratio =
+        qMin(1.0, qMax(0.0, this->m_view_globe_camera_collision_lift_m) / distance_m);
+    const double maximum_elevation_rad = -std::asin(lift_ratio)
+        - distance_m / MinimumWgs84CurvatureRadiusM
+        - qDegreesToRadians(ViewGlobeLookLimitMarginDeg);
+    const double minimum_elevation_rad = qDegreesToRadians(ViewGlobeLookMinimumElevationDeg);
+    elevation_rad = qMax(minimum_elevation_rad,
+                         qMin(elevation_rad, qMax(minimum_elevation_rad, maximum_elevation_rad)));
+
+    const double horizontal = std::cos(elevation_rad);
+    const double direction[3] = {
+        frame.east[0] * horizontal * std::sin(heading_rad)
+            + frame.north[0] * horizontal * std::cos(heading_rad) + frame.up[0] * std::sin(elevation_rad),
+        frame.east[1] * horizontal * std::sin(heading_rad)
+            + frame.north[1] * horizontal * std::cos(heading_rad) + frame.up[1] * std::sin(elevation_rad),
+        frame.east[2] * horizontal * std::sin(heading_rad)
+            + frame.north[2] * horizontal * std::cos(heading_rad) + frame.up[2] * std::sin(elevation_rad)};
+    GeoWgs84Ellipsoid::EcefPositionD next_target;
+    next_target.x = eye.x + direction[0] * distance_m;
+    next_target.y = eye.y + direction[1] * distance_m;
+    next_target.z = eye.z + direction[2] * distance_m;
+
+    // A deliberate heading change leaves north-up, as an orbit yaw does.
+    const bool north_up_locked = this->m_view_globe_north_up_locked;
+    if (delta_pixels.x() != 0)
+        this->m_view_globe_north_up_locked = false;
+    if (!setViewGlobeOrbitEyeAndTarget(eye, next_target))
+        this->m_view_globe_north_up_locked = north_up_locked;
+}
+
 CoordinateWGS84 MapModel::wgs84FromScreen(const QPoint &pos, const QSize &viewport) const
 {
     const QPointF center = centerMercator();

@@ -185,65 +185,6 @@ GeoWgs84Ellipsoid::EcefPositionD currentEyeEcef(const MapModel &map_model)
 }
 
 
-// Re-anchors the orbit rig on `target` (a point on the current crosshair
-// ray) so that the rig's eye is exactly `eye`: the inverse of
-// GeoWgs84Ellipsoid::orbitCameraEyeEcefD(). The eye-only collision lift is
-// kept and re-applied along the new target's up. Since `target` lies on the
-// ray from the eye through the old target, the view direction and with it
-// the picture are unchanged; only the point the rig turns around moves.
-bool reanchorOrbitRig(MapModel &map_model, const GeoWgs84Ellipsoid::EcefPositionD &eye,
-                      const GeoWgs84Ellipsoid::EcefPositionD &target, double collision_lift_m)
-{
-    double lon_deg = 0.0;
-    double lat_deg = 0.0;
-    double height_m = 0.0;
-    if (!GeoWgs84Ellipsoid::ecefToGeodetic(target, &lon_deg, &lat_deg, &height_m))
-        return false;
-
-    // GeographicLib's local frame at a geodetic point (the rotation columns
-    // orbitCameraEyeEcefD() uses): east, north and the ellipsoid normal.
-    const double lon_rad = qDegreesToRadians(lon_deg);
-    const double lat_rad = qDegreesToRadians(lat_deg);
-    const double east_x = -std::sin(lon_rad);
-    const double east_y = std::cos(lon_rad);
-    const double east_z = 0.0;
-    const double north_x = -std::sin(lat_rad) * std::cos(lon_rad);
-    const double north_y = -std::sin(lat_rad) * std::sin(lon_rad);
-    const double north_z = std::cos(lat_rad);
-    const double up_x = std::cos(lat_rad) * std::cos(lon_rad);
-    const double up_y = std::cos(lat_rad) * std::sin(lon_rad);
-    const double up_z = std::sin(lat_rad);
-
-    // Eye relative to the target, without the eye-only lift.
-    const double lift_m = qMax(0.0, collision_lift_m);
-    const double dx = eye.x - target.x - up_x * lift_m;
-    const double dy = eye.y - target.y - up_y * lift_m;
-    const double dz = eye.z - target.z - up_z * lift_m;
-    const double east_m = dx * east_x + dy * east_y + dz * east_z;
-    const double north_m = dx * north_x + dy * north_y + dz * north_z;
-    const double up_m = dx * up_x + dy * up_y + dz * up_z;
-
-    const double horizontal_m = std::hypot(east_m, north_m);
-    const double distance_m = std::sqrt(horizontal_m * horizontal_m + up_m * up_m);
-    if (!std::isfinite(distance_m) || !(horizontal_m > 0.0))
-        return false;
-    // orbitCameraEyeEcefD(): eye horizontal = east*sin(yaw) - north*cos(yaw).
-    const double pitch_deg = qRadiansToDegrees(std::atan2(up_m, horizontal_m));
-    const double yaw_deg = qRadiansToDegrees(std::atan2(east_m, -north_m));
-    // Outside the limits the model would clamp, i.e. move the eye.
-    if (pitch_deg < MapModel::MinViewGlobePitchDeg || pitch_deg > MapModel::MaxViewGlobePitchDeg
-        || distance_m < MapModel::MinViewGlobeDistanceM || distance_m > MapModel::MaxViewGlobeDistanceM)
-    {
-        return false;
-    }
-
-    // No viewport: the anchor is a point on the drawn globe, no 2D extent
-    // clamp may move it.
-    map_model.setViewGlobeFocusAnchor(lon_deg, lat_deg, height_m, yaw_deg, pitch_deg, distance_m,
-                                      lift_m, QSize());
-    return true;
-}
-
 GeoWgs84Ellipsoid::EcefPositionD rayPoint(const GeoWgs84Ellipsoid::EcefPositionD &origin,
                                           double direction_x, double direction_y, double direction_z,
                                           double distance_m)
@@ -759,8 +700,8 @@ bool MapGlobeTerrainNavigation::anchorOrbitAtCrosshair()
     if (!surfaceRayHitAtScreen(crosshair, &hit) || !hit.isValid())
         return false;
 
-    const bool anchored = reanchorOrbitRig(*this->map_model, ray.origin_ecef, hit.ecef_position,
-                                           this->map_model->viewGlobeCameraCollisionLiftM());
+    const bool anchored = this->map_model->setViewGlobeOrbitEyeAndTarget(ray.origin_ecef,
+                                                                         hit.ecef_position);
     if (MapRenderDiagnostics::enabled())
         qInfo() << "AOWIS globe orbit: pivot at crosshair"
                 << (hit.isTerrainMesh() ? "terrain" : "ellipsoid")
@@ -844,8 +785,7 @@ bool MapGlobeTerrainNavigation::releaseOrbitAnchor()
     }
     const GeoWgs84Ellipsoid::EcefPositionD target =
         rayPoint(eye, direction_x, direction_y, direction_z, 0.5 * (near_m + far_m));
-    const bool anchored = reanchorOrbitRig(*this->map_model, eye, target,
-                                           this->map_model->viewGlobeCameraCollisionLiftM());
+    const bool anchored = this->map_model->setViewGlobeOrbitEyeAndTarget(eye, target);
     if (MapRenderDiagnostics::enabled())
         qInfo() << "AOWIS globe orbit: released at follow height" << goal_height_m
                 << (anchored ? "re-anchored" : "kept");

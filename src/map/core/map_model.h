@@ -114,6 +114,8 @@ public:
     static constexpr double GlobeNorthUpMaximumLatitudeDeg = 80.0;
     static constexpr double ViewGlobeOrbitYawDegreesPerPixel = 0.35;
     static constexpr double ViewGlobeOrbitPitchDegreesPerPixel = 0.25;
+    // Free look (Alt + mouse): view turn per pointer pixel, both axes.
+    static constexpr double ViewGlobeLookDegreesPerPixel = 0.15;
 
     MapCameraViewState cameraViewState() const;
     const std::optional<MapGlobeEyePose> &globeEyePose() const { return this->m_eye_pose; }
@@ -242,6 +244,23 @@ public:
     void providerFallbackChanged();
     void orbitViewGlobe(double yaw_delta_deg, double pitch_delta_deg);
     void orbitViewGlobeByPointerDelta(const QPoint &delta_pixels, bool include_pitch);
+    // Free look (Alt + mouse, an FPS-style look without gravity or
+    // movement): the eye stays where it is and the view direction turns
+    // about it, x = heading about the eye's local up, y = elevation (mouse
+    // up looks up). Done on the orbit rig: the target is placed the current
+    // orbit distance ahead along the new direction (setViewGlobeOrbitEyeAndTarget()),
+    // so every other navigation continues from the result unchanged. The
+    // rig cannot look above its target's horizon (MinViewGlobePitchDeg 0),
+    // so looking up stops just below the horizontal.
+    void lookViewGlobeByPointerDelta(const QPoint &delta_pixels);
+    // Re-anchors the orbit rig on target (ECEF; normally a point of the
+    // current view ray) with the eye exactly at eye: the inverse of
+    // GeoWgs84Ellipsoid::orbitCameraEyeEcefD(). Keeps the eye-only collision
+    // lift (re-applied along the new target's up). false, rig unchanged:
+    // degenerate geometry, an eye pose, or a pitch/distance the model would
+    // clamp (which would move the eye).
+    bool setViewGlobeOrbitEyeAndTarget(const GeoWgs84Ellipsoid::EcefPositionD &eye,
+                                       const GeoWgs84Ellipsoid::EcefPositionD &target);
     // Model-only ellipsoid fallback for the geodetic coordinate under
     // screen_position. The Globe resolves against its rendered DEM
     // first because MapModel intentionally has no renderer/terrain-mesh access.
