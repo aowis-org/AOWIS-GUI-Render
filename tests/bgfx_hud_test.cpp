@@ -1255,6 +1255,50 @@ void testGlobe()
             && scan.where(MapBgfxHud::Action::ToggleHillshade).left()
                 > scan.where(MapBgfxHud::Action::ToggleMapTiles).right(),
         "the hillshade toggle follows the map toggle, top left");
+    // "?" follows the toggles: a click opens the globe controls card (HUD
+    // internal, no command), a second click closes it.
+    {
+        const QRectF hillshade = scan.where(MapBgfxHud::Action::ToggleHillshade);
+        const double y = hillshade.center().y();
+        double help_x = -1.0;
+        for (double x = hillshade.right() + 1.0; x < hillshade.right() + 80.0 && help_x < 0.0; x += 2.0)
+        {
+            hud.mousePress(x, y);
+            bool consumed = false;
+            hud.mouseRelease(x, y, &consumed);
+            if (hud.globeHelpOpen())
+                help_x = x;
+        }
+        req(help_x > hillshade.right(), "\"?\" after the toggles opens the globe controls card");
+        hud.build(&canvas, &cache, frameInputs(false), palette);
+        req(!canvas.overflowed(), "the globe controls card fits the draw list budget");
+        req(hud.blocksInput(30.0, y + 60.0), "the card under the toggles blocks map input");
+        hud.mousePress(help_x, y);
+        bool consumed = false;
+        hud.mouseRelease(help_x, y, &consumed);
+        req(!hud.globeHelpOpen(), "a second click closes the globe controls card");
+        hud.build(&canvas, &cache, frameInputs(false), palette);
+        req(!hud.blocksInput(30.0, y + 60.0), "a closed card no longer blocks map input");
+
+        // First-run tip: open for a while of shown globe, then closed.
+        hud.showGlobeHelpFor(5.0);
+        req(hud.globeHelpOpen() && hud.animating(), "a timed card is open and keeps frames coming");
+        MapBgfxHud::FrameInputs later = frameInputs(false);
+        hud.build(&canvas, &cache, later, palette);
+        later.time_s += 4.0;
+        hud.build(&canvas, &cache, later, palette);
+        req(hud.globeHelpOpen(), "the timed card stays open before its time");
+        later.time_s += 2.0;
+        hud.build(&canvas, &cache, later, palette);
+        req(!hud.globeHelpOpen() && !hud.animating(), "the timed card closes after its time");
+
+        // The running gesture's hint, bottom centre (drawn while set).
+        hud.setNavigationGesture(MapBgfxHud::NavigationGesture::Look);
+        hud.build(&canvas, &cache, frameInputs(false), palette);
+        req(!canvas.overflowed(), "the gesture hint fits the draw list budget");
+        hud.setNavigationGesture(MapBgfxHud::NavigationGesture::None);
+        hud.build(&canvas, &cache, frameInputs(false), palette);
+    }
     req(scan.found(MapBgfxHud::Action::UndergroundMode), "underground mode buttons are clickable");
     req(scan.where(MapBgfxHud::Action::UndergroundMode).bottom() > ViewportHeight - 100.0,
         "underground mode is at the bottom");

@@ -348,6 +348,18 @@ void MapBgfxHud::build(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
 {
     this->right_to_left = inputs.layout_direction == Qt::RightToLeft;
     updateMeshPanel(inputs.time_s);
+    // First-run globe controls card: the timer runs while the globe shows.
+    if (this->help_open && this->help_auto_close_s > 0.0 && this->globe.visible)
+    {
+        if (this->help_close_at_s < 0.0)
+            this->help_close_at_s = inputs.time_s + this->help_auto_close_s;
+        else if (inputs.time_s >= this->help_close_at_s)
+        {
+            this->help_open = false;
+            this->help_auto_close_s = 0.0;
+            this->help_close_at_s = -1.0;
+        }
+    }
     cache->beginFrame();
     canvas->clear();
     buildOnce(canvas, cache, inputs, palette);
@@ -638,6 +650,9 @@ void MapBgfxHud::buildOnce(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
         const double width_2d = std::max(SegmentMinimumWidthPx, buttonWidth(cache, label_2d));
         const double width_3d = std::max(SegmentMinimumWidthPx, buttonWidth(cache, label_3d));
         const bool toggles = this->view_switch_visible && this->globe.visible;
+        // "?" (globe controls card) wherever the globe is shown, the map
+        // editor included (it has no view switch).
+        const bool help_button = this->globe.visible;
         const double width_wireframe = toggles ? buttonWidth(cache, label_wireframe) : 0.0;
         const double width_map = toggles ? buttonWidth(cache, label_map) : 0.0;
         const double width_hillshade = toggles ? buttonWidth(cache, label_hillshade) : 0.0;
@@ -647,6 +662,8 @@ void MapBgfxHud::buildOnce(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
         if (toggles)
             content_width += ViewToggleSpacingPx + width_wireframe + ControlsSpacingPx + width_map
                 + ControlsSpacingPx + width_hillshade;
+        if (help_button)
+            content_width += ViewToggleSpacingPx + segment_height;
         const double frame_width = 2.0 * FramePaddingPx + content_width;
         const double frame_x = this->right_to_left
             ? std::max(MarginPx, viewport_width - MarginPx - frame_width) : MarginPx;
@@ -707,7 +724,17 @@ void MapBgfxHud::buildOnce(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
             drawButton(canvas, cache, button_rect(x, width_hillshade), label_hillshade,
                        Target{Element::GlobeHillshade, -1, -1}, true, this->globe.hillshade, palette,
                        tr("Shade the 3D terrain relief, lit from the north-west."));
+            x += width_hillshade;
         }
+        if (help_button)
+        {
+            x += ViewToggleSpacingPx;
+            drawButton(canvas, cache, button_rect(x, segment_height), QStringLiteral("?"),
+                       Target{Element::GlobeHelp, -1, -1}, true, this->help_open, palette,
+                       this->help_open ? QString() : tr("Mouse and keyboard controls of the 3D map"));
+        }
+        if (help_button && this->help_open)
+            globeHelpCard(canvas, cache, inputs, frame, palette);
     }
 
     // Pan joystick, top right, the zoom buttons under it.
@@ -717,12 +744,156 @@ void MapBgfxHud::buildOnce(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
     // Globe camera controls, compass and scale, bottom left (slice 5).
     globeControls(canvas, cache, inputs, palette);
 
+    // The running camera gesture's hint, bottom centre.
+    gestureHint(canvas, cache, inputs, palette);
+
     // Map legend, bottom right (slice 6b), then its popups and the tooltip
     // on top of everything.
     legendPanel(canvas, cache, inputs, palette);
     comboPopup(canvas, cache, inputs, palette);
     paletteMenu(canvas, cache, inputs, palette);
     tooltipBox(canvas, cache, inputs, palette);
+}
+
+void MapBgfxHud::showGlobeHelpFor(double seconds)
+{
+    this->help_open = true;
+    this->help_auto_close_s = std::max(0.0, seconds);
+    this->help_close_at_s = -1.0;
+}
+
+void MapBgfxHud::globeHelpCard(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
+                               const FrameInputs &inputs, const MapBgfxHudRect &anchor,
+                               const Palette &palette)
+{
+    // Rows: input (bold) | what it does. Keys come from the user's settings
+    // (setNavigationKeys()); a missing key drops its row.
+    const NavigationKeys &keys = this->navigation_keys;
+    QStringList pan_keys;
+    for (const QString &key : {keys.pan_up, keys.pan_left, keys.pan_down, keys.pan_right})
+    {
+        if (!key.isEmpty())
+            pan_keys.append(key);
+    }
+    QStringList zoom_keys;
+    for (const QString &key : {keys.zoom_in, keys.zoom_out})
+    {
+        if (!key.isEmpty())
+            zoom_keys.append(key);
+    }
+    struct Row
+    {
+        QString input;
+        QString action;
+    };
+    QVector<Row> rows;
+    rows.append(Row{tr("Left drag"), tr("Pan the map")});
+    rows.append(Row{tr("Mouse wheel"), tr("Zoom to the crosshair")});
+    if (!keys.orbit_modifier.isEmpty())
+        rows.append(Row{tr("Hold %1, move mouse").arg(keys.orbit_modifier),
+                        tr("Orbit around the terrain at the crosshair")});
+    rows.append(Row{tr("Middle drag"), tr("Orbit around the terrain at the crosshair")});
+    if (!keys.look_modifier.isEmpty())
+        rows.append(Row{tr("Hold %1, move mouse").arg(keys.look_modifier),
+                        tr("Look around from the camera")});
+    if (!pan_keys.isEmpty())
+    {
+        rows.append(Row{pan_keys.join(QStringLiteral(" ")), tr("Pan")});
+        rows.append(Row{tr("Shift + pan keys"), tr("Pan faster")});
+    }
+    if (!zoom_keys.isEmpty())
+        rows.append(Row{zoom_keys.join(QStringLiteral(" / ")), tr("Zoom")});
+    const QString title = tr("3D map controls");
+    const QString footer = tr("Keys: Settings > Keyboard Shortcuts");
+
+    const double line_height = cache->measure(QStringLiteral("Ag"), this->font).height();
+    const double row_spacing = 2.0;
+    const double column_gap = 12.0;
+    double input_width = 0.0;
+    double action_width = 0.0;
+    for (const Row &row : rows)
+    {
+        input_width = std::max(input_width, cache->measure(row.input, this->bold_font).width());
+        action_width = std::max(action_width, cache->measure(row.action, this->font).width());
+    }
+    const double content_width = std::max(
+        {input_width + column_gap + action_width,
+         cache->measure(title, this->bold_font).width(),
+         cache->measure(footer, this->font).width()});
+    const double width = std::ceil(content_width + 2.0 * FramePaddingPx);
+    const double height = std::ceil(2.0 * FramePaddingPx + line_height + 2.0 * row_spacing
+                                    + double(rows.size()) * (line_height + row_spacing)
+                                    + row_spacing + line_height);
+    const double viewport_width = inputs.viewport.width();
+    const double x = this->right_to_left
+        ? std::max(MarginPx, anchor.right() - width)
+        : std::min(anchor.x, std::max(MarginPx, viewport_width - MarginPx - width));
+    const MapBgfxHudRect card{x, anchor.y + anchor.height + PanelSpacingPx, width, height};
+    drawPanel(canvas, card, palette);
+
+    // RTL: columns from the right edge.
+    const std::function<double(double, double)> text_x =
+        [this, &card](double offset, double text_width)
+    {
+        return this->right_to_left ? card.right() - FramePaddingPx - offset - text_width
+                                   : card.x + FramePaddingPx + offset;
+    };
+    double y = card.y + FramePaddingPx;
+    drawText(canvas, cache, text_x(0.0, cache->measure(title, this->bold_font).width()), y, title,
+             this->bold_font, palette.text);
+    y += line_height + 2.0 * row_spacing;
+    for (const Row &row : rows)
+    {
+        drawText(canvas, cache, text_x(0.0, cache->measure(row.input, this->bold_font).width()), y,
+                 row.input, this->bold_font, palette.text);
+        drawText(canvas, cache,
+                 text_x(input_width + column_gap, cache->measure(row.action, this->font).width()), y,
+                 row.action, this->font, palette.text);
+        y += line_height + row_spacing;
+    }
+    y += row_spacing;
+    drawText(canvas, cache, text_x(0.0, cache->measure(footer, this->font).width()), y, footer,
+             this->font, palette.disabled_text);
+}
+
+void MapBgfxHud::gestureHint(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
+                             const FrameInputs &inputs, const Palette &palette)
+{
+    if (!this->globe.visible || this->navigation_gesture == NavigationGesture::None)
+        return;
+    QString text;
+    switch (this->navigation_gesture)
+    {
+        case NavigationGesture::Orbit:
+            text = this->navigation_keys.orbit_modifier.isEmpty()
+                ? tr("Orbiting around the terrain at the crosshair")
+                : tr("Orbiting around the terrain at the crosshair. Release %1 to stop.")
+                      .arg(this->navigation_keys.orbit_modifier);
+            break;
+        case NavigationGesture::OrbitMiddle:
+            text = tr("Orbiting around the terrain at the crosshair. Release the middle mouse button to stop.");
+            break;
+        case NavigationGesture::Look:
+            text = this->navigation_keys.look_modifier.isEmpty()
+                ? tr("Looking around from the camera")
+                : tr("Looking around from the camera. Release %1 to stop.")
+                      .arg(this->navigation_keys.look_modifier);
+            break;
+        case NavigationGesture::None:
+            return;
+    }
+    const QSizeF size = cache->measure(text, this->font);
+    const double width = std::ceil(size.width() + 2.0 * FramePaddingPx);
+    const double height = std::ceil(size.height() + 2.0 * FramePaddingPx);
+    const double x = std::max(MarginPx, std::floor(0.5 * (inputs.viewport.width() - width)));
+    // Above the bottom row of controls' baseline, clear of the edge.
+    const double y = std::max(MarginPx, inputs.viewport.height() - MarginPx - height);
+    const MapBgfxHudRect hint{x, y, width, height};
+    // Informational: not a blocking panel (the pointer is captured anyway).
+    canvas->fillRoundedRect(hint, PanelRadiusPx, palette.panel);
+    canvas->strokeRoundedRect(hint, PanelRadiusPx, 1.0, palette.border);
+    drawText(canvas, cache, hint.x + FramePaddingPx, hint.y + FramePaddingPx, text, this->font,
+             palette.text);
 }
 
 // --- Globe (slice 5) ------------------------------------------------------------
@@ -1894,6 +2065,7 @@ bool MapBgfxHud::isClickable(Element element)
         case Element::GlobeMapTiles:
         case Element::GlobeHillshade:
         case Element::GlobeUnderground:
+        case Element::GlobeHelp:
             return true;
         default:
             return false;
@@ -2184,6 +2356,16 @@ MapBgfxHud::Action MapBgfxHud::mouseRelease(double x, double y, bool *consumed, 
         || armed_target.element == Element::LegendComboScroll
         || targetAt(x, y) != armed_target)
     {
+        return Action::None;
+    }
+    // "?" is HUD-internal: toggles the globe controls card (no command).
+    if (armed_target.element == Element::GlobeHelp)
+    {
+        this->help_open = !this->help_open;
+        this->help_auto_close_s = 0.0;
+        this->help_close_at_s = -1.0;
+        // The tooltip would cover the card; the next target shows its own.
+        this->tooltip_suppressed = true;
         return Action::None;
     }
     // A clicked Cancel stays disabled until fresh activity numbers arrive.

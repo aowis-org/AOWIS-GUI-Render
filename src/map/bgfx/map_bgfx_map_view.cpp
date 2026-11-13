@@ -1733,6 +1733,18 @@ void MapBgfxMapView::setHudJoystick(const QPointF &deflection, bool active)
     this->hud.setJoystick(deflection, active);
 }
 
+void MapBgfxMapView::setHudNavigationGesture(MapBgfxHud::NavigationGesture gesture)
+{
+    requestRedraw();
+    this->hud.setNavigationGesture(gesture);
+}
+
+void MapBgfxMapView::showHudGlobeHelpFor(double seconds)
+{
+    requestRedraw();
+    this->hud.showGlobeHelpFor(seconds);
+}
+
 void MapBgfxMapView::setHudKeyboardPan(const QPointF &direction)
 {
     requestRedraw();

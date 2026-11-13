@@ -281,7 +281,8 @@ public:
     {
         return this->tiles_active > 0 || this->tiles_queued > 0 || this->terrain_active > 0
             || this->terrain_queued > 0 || this->tooltip_waiting
-            || (this->globe.visible && this->globe.mesh_active) || this->mesh_panel_shown;
+            || (this->globe.visible && this->globe.mesh_active) || this->mesh_panel_shown
+            || (this->help_open && this->help_auto_close_s > 0.0);
     }
     // The map is shown fullscreen: the button shows "leave fullscreen". The
     // button is always there (first in the top-left panel).
@@ -299,11 +300,33 @@ public:
         QString pan_right;
         QString zoom_in;
         QString zoom_out;
+        // Globe gesture hold keys ("Ctrl", "Alt", ...), listed in the globe
+        // controls card and the gesture hint.
+        QString orbit_modifier;
+        QString look_modifier;
     };
     void setNavigationKeys(const NavigationKeys &keys) { this->navigation_keys = keys; }
     // Keyboard pan keys held: the view's direction (x right, y down; each
     // -1, 0 or 1). The joystick's arrows glow for them too.
     void setKeyboardPan(const QPointF &direction) { this->keyboard_pan_direction = direction; }
+    // A camera gesture of the map's pointer capture is running: the hint at
+    // the bottom says what it does and how to end it (globe only).
+    enum class NavigationGesture
+    {
+        None,
+        // Orbit hold key + mouse move.
+        Orbit,
+        // Middle-button drag.
+        OrbitMiddle,
+        // Free-look hold key + mouse move.
+        Look
+    };
+    void setNavigationGesture(NavigationGesture gesture) { this->navigation_gesture = gesture; }
+    // The globe controls card (the "?" button next to the globe toggles):
+    // opens it now and closes it after `seconds` of shown globe (first-run
+    // tip). A click on "?" toggles it and cancels the timer.
+    void showGlobeHelpFor(double seconds);
+    bool globeHelpOpen() const { return this->help_open; }
     // Replaces the legend content. Open popups stay open when their group
     // still exists; hiding the legend closes them.
     void setLegend(const Legend &legend);
@@ -434,6 +457,8 @@ private:
         GlobeSlider,
         Compass,
         Joystick,
+        // "?" next to the globe toggles: the globe controls card.
+        GlobeHelp,
         // Background of an open popup: blocks what lies underneath
         // (Target::index: PopupComboList or PopupPaletteMenu).
         Popup
@@ -492,6 +517,13 @@ private:
                     int index, const Palette &palette);
     void drawCompass(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache, double x, double y,
                      const Palette &palette);
+    // The globe controls card under the top-left panel (help_open).
+    void globeHelpCard(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
+                       const FrameInputs &inputs, const MapBgfxHudRect &anchor,
+                       const Palette &palette);
+    // The running gesture's hint, bottom centre.
+    void gestureHint(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache,
+                     const FrameInputs &inputs, const Palette &palette);
     // Pan joystick, top right, and the zoom buttons under it.
     void joystick(MapBgfxHudCanvas *canvas, const FrameInputs &inputs, const Palette &palette);
     void zoomButtons(MapBgfxHudCanvas *canvas, MapBgfxHudTextCache *cache, const FrameInputs &inputs,
@@ -574,6 +606,13 @@ private:
     bool joystick_active = false;
     QPointF keyboard_pan_direction;
     NavigationKeys navigation_keys;
+    NavigationGesture navigation_gesture = NavigationGesture::None;
+    // Globe controls card: open, and an automatic close after
+    // help_auto_close_s seconds of shown globe (0: none); the deadline is
+    // set at the first build that shows it (frame time).
+    bool help_open = false;
+    double help_auto_close_s = 0.0;
+    double help_close_at_s = -1.0;
     // Joystick and zoom buttons of the last build (wheel zooms there).
     MapBgfxHudRect joystick_rect;
     MapBgfxHudRect zoom_rect;

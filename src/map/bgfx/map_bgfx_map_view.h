@@ -317,6 +317,10 @@ public:
     void setHudFullscreen(bool active);
     // The pan joystick's knob (MapWidget::joystickChanged()).
     void setHudJoystick(const QPointF &deflection, bool active);
+    // The map's running camera gesture (orbit / free look): HUD hint.
+    void setHudNavigationGesture(MapBgfxHud::NavigationGesture gesture);
+    // Opens the HUD's globe controls card for `seconds` of shown globe.
+    void showHudGlobeHelpFor(double seconds);
     // Held keyboard pan keys (MapWidget::keyboardPanChanged()): the
     // joystick's arrows glow.
     void setHudKeyboardPan(const QPointF &direction);
