@@ -6,15 +6,6 @@ closed only when the Render build, the hosts' build-gated tests, the relevant
 functional tests and a check on real devices pass. Source-only and mock
 validation is not a sign-off.
 
-## Mobile host
-
-| Work | Done when |
-| --- | --- |
-| Android runtime acceptance of `HostContext` | 2D and globe draw on real devices; background and resume, rotation, scene-graph invalidation and process restore recover without a black or frozen map |
-| Touch gestures for the globe | Pan, pinch zoom, twist and two-finger tilt feel right on devices; the globe HUD's sliders and compass work by touch; a touch equivalent of free look (and its `setHudNavigationGesture()` hint) |
-| Mobile presentation | A drawn position marker; a scale bar in the user's length unit |
-| Network on Mobile | Mobile builds a `NetworkRenderSnapshot` from its project data once it has one |
-
 ## Engine
 
 | Work | Done when |
@@ -27,17 +18,15 @@ validation is not a sign-off.
 
 ## Platform acceptance
 
-- Native Linux OpenGL and Vulkan, Windows Direct3D 11, macOS Metal and
-  WebAssembly WebGL 2: viewport resize, view switching, first-owner swapchain
-  cases, D24S8 depth and skirts.
+- Native Linux OpenGL and Vulkan, macOS Metal and WebAssembly WebGL 2:
+  viewport resize, view switching, first-owner swapchain cases, D24S8 depth
+  and skirts. (Windows and Android: reported working by the user,
+  14 November 2026.)
 - Loading into uncached terrain, cache eviction and bad connectivity.
 - Repeated device retirement and recreation; CPU caches survive, GPU
   resources are rebuilt.
 - Antialiasing: each MSAA level (`SwapChain::flags`) takes effect on every
   backend, and a level the GPU lacks is clamped without an error.
-- Windows: dragging the map after the click's focus routing (native child
-  window), and a bare Alt press and release for free look not leaving
-  keyboard focus on the menu bar.
 
 Change the order when real builds or device tests expose correctness
 problems.
