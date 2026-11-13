@@ -367,6 +367,46 @@ void MapBgfxMapView::createNativeWindow()
 }
 #endif
 
+bool MapBgfxMapView::focusLossIsInternalPointerRouting() const
+{
+    // A press on the map routes keyboard focus (host->
+    // mapViewFocusNavigationInput(): activate the top-level, focus the host
+    // widget, activate the native window). On Windows each of those steps
+    // moves Win32 focus between the top-level HWND and the embedded child
+    // HWND, and the resulting FocusOut / WindowDeactivate (on the native
+    // window) and QWidget FocusOut (on the host) arrive AFTER the press was
+    // already delivered. Treating them as focus loss cancelled the drag that
+    // press had just started: the map tracked the pointer but never panned.
+    //
+    // Internal routing: a button is held (the drag is in progress, the OS
+    // keeps the implicit mouse grab on the native window regardless of
+    // keyboard focus) and the new focus window is still inside the native
+    // window's own top-level window. Focus leaving the top-level (another
+    // application, a popup / dialog window) or any loss without a held
+    // button (held navigation keys) still cancels as before.
+    if (this->native_window == nullptr)
+        return false;
+    if (QGuiApplication::mouseButtons() == Qt::NoButton)
+        return false;
+    if (QGuiApplication::applicationState() != Qt::ApplicationActive)
+        return false;
+    QWindow *focus_window = QGuiApplication::focusWindow();
+    if (focus_window == nullptr)
+        return false;
+    QWindow *focus_top_level = focus_window;
+    while (focus_top_level->parent() != nullptr)
+        focus_top_level = focus_top_level->parent();
+    QWindow *map_top_level = this->native_window;
+    while (map_top_level->parent() != nullptr)
+        map_top_level = map_top_level->parent();
+    const bool internal = focus_top_level == map_top_level;
+    if (MapRenderDiagnostics::enabled())
+        qInfo() << "AOWIS map input: focus change during pointer press"
+                << (internal ? "kept (internal routing)" : "cancels navigation")
+                << "focus window" << focus_window;
+    return internal;
+}
+
 MapBgfxMapView::~MapBgfxMapView()
 {
     if (MapRenderDiagnostics::enabled())
@@ -555,7 +595,8 @@ bool MapBgfxMapView::eventFilter(QObject *watched, QEvent *event)
         scheduleBackendRestart();
     }
     if (watched == this->native_window
-        && mapNativeInputFocusLost(event->type()))
+        && mapNativeInputFocusLost(event->type())
+        && !focusLossIsInternalPointerRouting())
     {
         if (this->navigation_cancel)
             this->navigation_cancel();
@@ -627,6 +668,10 @@ bool MapBgfxMapView::handleKeyRelease(QKeyEvent *event)
 
 void MapBgfxMapView::handleFocusOut()
 {
+#ifndef Q_OS_WASM
+    if (focusLossIsInternalPointerRouting())
+        return;
+#endif
     if (this->navigation_cancel)
         this->navigation_cancel();
     this->hud.closePopup();

@@ -429,6 +429,9 @@ private:
     bool initializeHostContext(const HostContext &context);
 #ifndef Q_OS_WASM
     void createNativeWindow();
+    // true when a focus/activation loss is only the map's own click focus
+    // routing (see the definition); navigation must then not be cancelled.
+    bool focusLossIsInternalPointerRouting() const;
 #endif
     // The view's own native window, else the host's area.
     QSize viewLogicalPixels() const;
