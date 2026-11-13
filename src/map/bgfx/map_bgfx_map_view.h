@@ -452,8 +452,8 @@ private:
     // repository requests on tile-set changes, then draw.
     void renderImagery(const QSizeF &logical, bool camera_moving);
     void synchronizeGeometry();
-    // Swap, present mode and the user's MSAA level for the native back buffer.
-    uint32_t currentResetFlags() const;
+    // The user's MSAA level as bgfx::SwapChain::flags (native back buffer).
+    uint32_t currentSwapChainFlags() const;
     // Rebuilds the selection/error highlight meshes when the selection, the
     // errors, the prepared geometry or the junction visibility changed.
     void synchronizeHighlights();
@@ -699,10 +699,10 @@ private:
     bool frame_animating = false;
     double last_frame_time_ms = -1.0;
     QSize last_physical_size;
-    // Reset flags of the native back buffer as last applied (init/reset):
-    // synchronizeGeometry() resets again when the antialiasing setting
-    // changes them, not only on resize.
-    uint32_t last_reset_flags = 0;
+    // Swap chain flags (MSAA) of the native back buffer as last applied
+    // (init/reset): synchronizeGeometry() resets again when the
+    // antialiasing setting changes them, not only on resize.
+    uint32_t last_swap_chain_flags = 0;
     std::function<int()> antialiasing_samples_source;
     MapUndergroundMode underground_mode = MapUndergroundMode::XRay;
     bgfx::ViewId map_view_id = 0;

@@ -111,8 +111,9 @@ int imageryUploadBudget(bool globe, bool camera_moving)
     return MapTileStreamingPolicy::uploadBudget(
         globe, camera_moving, globe ? globe_override : two_d_override);
 }
-// VSYNC: presentation pacing (see MapFramePacer). MSAA: the user's level
-// (currentResetFlags()); bgfx clamps it to what the renderer supports.
+// VSYNC: presentation pacing (see MapFramePacer). MSAA is not a reset flag
+// in the pinned bgfx: the user's level goes in SwapChain::flags
+// (currentSwapChainFlags(), bgfx_antialiasing.h).
 // FLIP_AFTER_RENDER: with BGFX_CONFIG_MULTITHREADED=0 bgfx by default
 // presents (swaps) the frame rendered by the previous bgfx::frame() call at
 // the start of the next one. The map renders on demand, so the last frame
@@ -126,8 +127,7 @@ int imageryUploadBudget(bool globe, bool camera_moving)
 // frame traps with "RuntimeError: null function" inside
 // RendererContextGL::submit(). The browser multisamples the canvas instead:
 // the WebGL context is created with antialias=true (createBrowserContext()).
-// Desktop adds the user's MSAA level on top (currentResetFlags()).
-constexpr uint32_t kMapBgfxBaseResetFlags = BGFX_RESET_VSYNC | BGFX_RESET_FLIP_AFTER_RENDER;
+constexpr uint32_t kMapBgfxResetFlags = BGFX_RESET_VSYNC | BGFX_RESET_FLIP_AFTER_RENDER;
 // Fallback when the platform reports no usable refresh rate.
 constexpr double kFallbackRefreshHz = 60.0;
 #ifdef Q_OS_WASM
@@ -2584,35 +2584,36 @@ void MapBgfxMapView::synchronizeGeometry()
     const QSize pixels = physicalSize();
     // Polled every frame (synchronizeGeometry() runs per tick): the setting
     // is a plain function call, the reset happens only when it changed.
-    const uint32_t reset_flags = currentResetFlags();
-    const bool antialiasing_changed = reset_flags != this->last_reset_flags;
+    const uint32_t swap_chain_flags = currentSwapChainFlags();
+    const bool antialiasing_changed = swap_chain_flags != this->last_swap_chain_flags;
     if (pixels == this->last_physical_size && !antialiasing_changed)
         return;
     this->last_physical_size = pixels;
     if (antialiasing_changed && MapRenderDiagnostics::enabled())
-        qInfo() << "bgfx map: back buffer reset for antialiasing, reset flags"
-                << Qt::hex << reset_flags;
+        qInfo() << "bgfx map: back buffer reset for antialiasing, swap chain flags"
+                << Qt::hex << swap_chain_flags;
     // Preserve a depth attachment across resize. The default SwapChain()
     // requests none, even though bgfx::Init defaults to D24S8.
-    const bgfx::SwapChain swap_chain = BgfxNativeSurface::resizeSwapChain(
+    bgfx::SwapChain swap_chain = BgfxNativeSurface::resizeSwapChain(
         static_cast<std::uint32_t>(pixels.width()),
         static_cast<std::uint32_t>(pixels.height()));
-    bgfx::reset(reset_flags, &swap_chain);
-    this->last_reset_flags = reset_flags;
+    swap_chain.flags = swap_chain_flags;
+    bgfx::reset(kMapBgfxResetFlags, &swap_chain);
+    this->last_swap_chain_flags = swap_chain_flags;
     // An antialiasing change alone moves no camera: present it.
     if (antialiasing_changed)
         requestRedraw();
 }
 
-uint32_t MapBgfxMapView::currentResetFlags() const
+uint32_t MapBgfxMapView::currentSwapChainFlags() const
 {
 #ifdef Q_OS_WASM
-    return kMapBgfxBaseResetFlags;
+    return BGFX_SWAP_CHAIN_NONE;
 #else
     const int samples = this->antialiasing_samples_source
         ? this->antialiasing_samples_source()
         : BgfxAntialiasingDefaultSamples;
-    return kMapBgfxBaseResetFlags | bgfxMsaaResetFlag(samples);
+    return bgfxMsaaSwapChainFlag(samples);
 #endif
 }
 
@@ -2669,8 +2670,9 @@ bool MapBgfxMapView::initializeBackend()
     const QSize pixels = physicalSize();
     settings.swapChain.width = static_cast<uint32_t>(pixels.width());
     settings.swapChain.height = static_cast<uint32_t>(pixels.height());
-    settings.reset = currentResetFlags();
-    this->last_reset_flags = settings.reset;
+    settings.reset = kMapBgfxResetFlags;
+    settings.swapChain.flags = currentSwapChainFlags();
+    this->last_swap_chain_flags = settings.swapChain.flags;
 
     // Renderer choice is delegated to bgfx (RendererType::Count ranks the
     // platform's renderers and falls through when one fails to initialise).
