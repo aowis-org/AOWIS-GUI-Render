@@ -76,6 +76,23 @@ public:
     // Ends a running follow; the next step starts with a fresh time step
     // (mode switch, start or end of an orbit).
     void stopFollowing();
+    // Start of an orbit (Rotate: Ctrl / middle mouse, HUD compass/tilt):
+    // re-anchors the rig on the drawn surface where the crosshair ray hits
+    // it (terrain mesh, else the ellipsoid), the eye exactly where it is, so
+    // nothing moves on screen. The rotation axis is then the local up at that
+    // hit, i.e. the terrain under the crosshair. Without it the pivot sat at
+    // the crosshair's lon/lat but at the height of the DEM under the EYE (see
+    // syncCameraHeight()), above or below the crosshair terrain: the view
+    // swung around a point floating in the air or buried in a hillside.
+    // false: rig unchanged (no hit, eye pose, or the anchor falls outside the
+    // model's pitch/distance limits).
+    bool anchorOrbitAtCrosshair();
+    // End of an orbit (Pan again): slides the target along the same crosshair
+    // ray to the height terrain following aims for (the drawn DEM under the
+    // eye), eye unchanged, so following resumes from its goal instead of
+    // lifting or lowering the whole rig by the crosshair/eye terrain step.
+    // false: rig unchanged (following then eases the height as before).
+    bool releaseOrbitAnchor();
 
 private:
     // DEM under the eye at the LOD the camera distance selects (requests it

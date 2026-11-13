@@ -9,7 +9,9 @@
 #include "map/render/map_globe_picking.h"
 #include "map/render/map_globe_surface_preparation.h"
 #include "map/render/map_globe_vertical_transform.h"
+#include "map/render/map_render_diagnostics.h"
 
+#include <QDebug>
 #include <QScopedValueRollback>
 #include <QtMath>
 
@@ -180,6 +182,77 @@ GeoWgs84Ellipsoid::EcefPositionD currentEyeEcef(const MapModel &map_model)
     return GeoWgs84Ellipsoid::orbitCameraEyeEcefD(
         map_model.centerLon(), map_model.centerLat(), map_model.viewGlobeYawDeg(), pitch_deg,
         distance_m, map_model.viewGlobeVerticalOffsetM(), map_model.viewGlobeCameraCollisionLiftM());
+}
+
+
+// Re-anchors the orbit rig on `target` (a point on the current crosshair
+// ray) so that the rig's eye is exactly `eye`: the inverse of
+// GeoWgs84Ellipsoid::orbitCameraEyeEcefD(). The eye-only collision lift is
+// kept and re-applied along the new target's up. Since `target` lies on the
+// ray from the eye through the old target, the view direction and with it
+// the picture are unchanged; only the point the rig turns around moves.
+bool reanchorOrbitRig(MapModel &map_model, const GeoWgs84Ellipsoid::EcefPositionD &eye,
+                      const GeoWgs84Ellipsoid::EcefPositionD &target, double collision_lift_m)
+{
+    double lon_deg = 0.0;
+    double lat_deg = 0.0;
+    double height_m = 0.0;
+    if (!GeoWgs84Ellipsoid::ecefToGeodetic(target, &lon_deg, &lat_deg, &height_m))
+        return false;
+
+    // GeographicLib's local frame at a geodetic point (the rotation columns
+    // orbitCameraEyeEcefD() uses): east, north and the ellipsoid normal.
+    const double lon_rad = qDegreesToRadians(lon_deg);
+    const double lat_rad = qDegreesToRadians(lat_deg);
+    const double east_x = -std::sin(lon_rad);
+    const double east_y = std::cos(lon_rad);
+    const double east_z = 0.0;
+    const double north_x = -std::sin(lat_rad) * std::cos(lon_rad);
+    const double north_y = -std::sin(lat_rad) * std::sin(lon_rad);
+    const double north_z = std::cos(lat_rad);
+    const double up_x = std::cos(lat_rad) * std::cos(lon_rad);
+    const double up_y = std::cos(lat_rad) * std::sin(lon_rad);
+    const double up_z = std::sin(lat_rad);
+
+    // Eye relative to the target, without the eye-only lift.
+    const double lift_m = qMax(0.0, collision_lift_m);
+    const double dx = eye.x - target.x - up_x * lift_m;
+    const double dy = eye.y - target.y - up_y * lift_m;
+    const double dz = eye.z - target.z - up_z * lift_m;
+    const double east_m = dx * east_x + dy * east_y + dz * east_z;
+    const double north_m = dx * north_x + dy * north_y + dz * north_z;
+    const double up_m = dx * up_x + dy * up_y + dz * up_z;
+
+    const double horizontal_m = std::hypot(east_m, north_m);
+    const double distance_m = std::sqrt(horizontal_m * horizontal_m + up_m * up_m);
+    if (!std::isfinite(distance_m) || !(horizontal_m > 0.0))
+        return false;
+    // orbitCameraEyeEcefD(): eye horizontal = east*sin(yaw) - north*cos(yaw).
+    const double pitch_deg = qRadiansToDegrees(std::atan2(up_m, horizontal_m));
+    const double yaw_deg = qRadiansToDegrees(std::atan2(east_m, -north_m));
+    // Outside the limits the model would clamp, i.e. move the eye.
+    if (pitch_deg < MapModel::MinViewGlobePitchDeg || pitch_deg > MapModel::MaxViewGlobePitchDeg
+        || distance_m < MapModel::MinViewGlobeDistanceM || distance_m > MapModel::MaxViewGlobeDistanceM)
+    {
+        return false;
+    }
+
+    // No viewport: the anchor is a point on the drawn globe, no 2D extent
+    // clamp may move it.
+    map_model.setViewGlobeFocusAnchor(lon_deg, lat_deg, height_m, yaw_deg, pitch_deg, distance_m,
+                                      lift_m, QSize());
+    return true;
+}
+
+GeoWgs84Ellipsoid::EcefPositionD rayPoint(const GeoWgs84Ellipsoid::EcefPositionD &origin,
+                                          double direction_x, double direction_y, double direction_z,
+                                          double distance_m)
+{
+    GeoWgs84Ellipsoid::EcefPositionD point;
+    point.x = origin.x + direction_x * distance_m;
+    point.y = origin.y + direction_y * distance_m;
+    point.z = origin.z + direction_z * distance_m;
+    return point;
 }
 }
 
@@ -662,4 +735,119 @@ void MapGlobeTerrainNavigation::syncCameraHeight(bool request_missing_tile)
         this->follow_active = true;
     else
         stopFollowing();
+}
+
+bool MapGlobeTerrainNavigation::anchorOrbitAtCrosshair()
+{
+    if (this->map_model == nullptr || this->map_model->viewMode() != MapViewMode::Globe
+        || this->map_model->globeEyePose() || !this->viewport_size.isValid())
+    {
+        return false;
+    }
+
+    const QPointF crosshair(double(this->viewport_size.width()) * 0.5,
+                            double(this->viewport_size.height()) * 0.5);
+    MapGlobeCamera camera;
+    camera.setViewportSize(this->viewport_size);
+    camera.syncFromMapModel(*this->map_model);
+    MapGlobeScreenRay ray;
+    if (!camera.screenRay(crosshair, &ray))
+        return false;
+    // The same ray against the same drawn surface the pointer coordinate and
+    // the pan use (surfaceRayHitAtScreen() builds this camera too).
+    MapGlobeSurfaceHit hit;
+    if (!surfaceRayHitAtScreen(crosshair, &hit) || !hit.isValid())
+        return false;
+
+    const bool anchored = reanchorOrbitRig(*this->map_model, ray.origin_ecef, hit.ecef_position,
+                                           this->map_model->viewGlobeCameraCollisionLiftM());
+    if (MapRenderDiagnostics::enabled())
+        qInfo() << "AOWIS globe orbit: pivot at crosshair"
+                << (hit.isTerrainMesh() ? "terrain" : "ellipsoid")
+                << "lon" << hit.coordinate.longitude_deg << "lat" << hit.coordinate.latitude_deg
+                << "height" << hit.surface_height_m << (anchored ? "anchored" : "kept");
+    return anchored;
+}
+
+bool MapGlobeTerrainNavigation::releaseOrbitAnchor()
+{
+    if (this->map_model == nullptr || this->map_model->viewMode() != MapViewMode::Globe
+        || this->map_model->globeEyePose() || !this->viewport_size.isValid())
+    {
+        return false;
+    }
+
+    const QPointF crosshair(double(this->viewport_size.width()) * 0.5,
+                            double(this->viewport_size.height()) * 0.5);
+    MapGlobeCamera camera;
+    camera.setViewportSize(this->viewport_size);
+    camera.syncFromMapModel(*this->map_model);
+    MapGlobeScreenRay ray;
+    if (!camera.screenRay(crosshair, &ray))
+        return false;
+    const GeoWgs84Ellipsoid::EcefPositionD eye = ray.origin_ecef;
+
+    // Following's goal (syncCameraHeight()): the drawn DEM under the eye,
+    // 0 while no DEM is cached there. Its small clearance term for very
+    // close, flat views is left to the filter.
+    CoordinateWGS84 eye_coordinate;
+    double eye_height_m = 0.0;
+    if (!GeoWgs84Ellipsoid::ecefToGeodetic(eye, &eye_coordinate.longitude_deg,
+                                           &eye_coordinate.latitude_deg, &eye_height_m))
+    {
+        return false;
+    }
+    double eye_terrain_elevation_m = 0.0;
+    if (this->terrain_repository == nullptr
+        || !cameraTerrainElevationAtCoordinate(eye_coordinate, &eye_terrain_elevation_m, false))
+    {
+        eye_terrain_elevation_m = 0.0;
+    }
+    const MapGlobeVerticalTransform vertical_transform(this->map_model->view3dVerticalExaggeration(),
+                                                       this->map_model->view3dNetworkGroundOffsetM());
+    const double goal_height_m = vertical_transform.terrainHeightM(eye_terrain_elevation_m);
+
+    // The point of the crosshair ray at that height: between the eye (above
+    // it) and the ellipsoid hit (height 0, below a positive goal). Heights at
+    // or below sea level, or a ray past the limb, are left to the filter.
+    const double direction_length = double(ray.direction.length());
+    if (!(direction_length > 0.0) || !(goal_height_m > 0.0) || !(eye_height_m > goal_height_m))
+        return false;
+    const double direction_x = double(ray.direction.x()) / direction_length;
+    const double direction_y = double(ray.direction.y()) / direction_length;
+    const double direction_z = double(ray.direction.z()) / direction_length;
+    GeoWgs84Ellipsoid::EcefPositionD ellipsoid_hit;
+    double ellipsoid_distance_m = 0.0;
+    if (!GeoWgs84Ellipsoid::rayIntersection(eye, ray.direction, &ellipsoid_hit, &ellipsoid_distance_m))
+        return false;
+
+    // Height along the ray falls monotonically from the eye to the ellipsoid
+    // hit (the ray descends to it): bisect to well below a millimetre.
+    double near_m = 0.0;
+    double far_m = ellipsoid_distance_m;
+    for (int iteration = 0; iteration < 64; ++iteration)
+    {
+        const double middle_m = 0.5 * (near_m + far_m);
+        double lon_deg = 0.0;
+        double lat_deg = 0.0;
+        double height_m = 0.0;
+        if (!GeoWgs84Ellipsoid::ecefToGeodetic(
+                rayPoint(eye, direction_x, direction_y, direction_z, middle_m),
+                &lon_deg, &lat_deg, &height_m))
+        {
+            return false;
+        }
+        if (height_m > goal_height_m)
+            near_m = middle_m;
+        else
+            far_m = middle_m;
+    }
+    const GeoWgs84Ellipsoid::EcefPositionD target =
+        rayPoint(eye, direction_x, direction_y, direction_z, 0.5 * (near_m + far_m));
+    const bool anchored = reanchorOrbitRig(*this->map_model, eye, target,
+                                           this->map_model->viewGlobeCameraCollisionLiftM());
+    if (MapRenderDiagnostics::enabled())
+        qInfo() << "AOWIS globe orbit: released at follow height" << goal_height_m
+                << (anchored ? "re-anchored" : "kept");
+    return anchored;
 }

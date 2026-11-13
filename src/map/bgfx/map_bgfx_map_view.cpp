@@ -267,11 +267,19 @@ MapBgfxMapView::MapBgfxMapView(MapModel *model, MapBgfxMapViewHost *view_host,
         if (!this->globe_ready || this->map_model->viewMode() != MapViewMode::Globe)
             return;
         this->terrain_navigation.stopFollowing();
-        // Entering an orbit is a pure state change (re-anchoring here would
-        // jump the map before any orbit delta); the orbit's camera changes
-        // drive the collision lift. Its end resumes ordinary following.
+        // Entering an orbit pivots on the terrain the crosshair ray hits.
+        // The re-anchor keeps the eye exactly in place (the rig only changes
+        // which point on the crosshair ray it turns around), so the map does
+        // not jump before the first orbit delta; the orbit's camera changes
+        // then drive the collision lift.
         if (state == MapView3dNavigationState::Rotate)
+        {
+            this->terrain_navigation.anchorOrbitAtCrosshair();
             return;
+        }
+        // Its end moves the target along the same ray to following's height
+        // (eye unchanged) and resumes ordinary following from there.
+        this->terrain_navigation.releaseOrbitAnchor();
         syncGlobeCameraHeight(true);
     });
     connect(this->map_model, &MapModel::view3dVerticalExaggerationChanged, this, [this](double)
