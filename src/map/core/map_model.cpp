@@ -1228,6 +1228,9 @@ bool MapModel::setViewGlobeOrbitEyeAndTarget(const GeoWgs84Ellipsoid::EcefPositi
 
     // No viewport: the anchor is a point on the drawn globe, no 2D extent
     // clamp may move it.
+    // Counted before the camera signals go out: a follow step they trigger
+    // already sees the new revision.
+    ++this->m_view_globe_reanchor_revision;
     setViewGlobeFocusAnchor(lon_deg, lat_deg, height_m, yaw_deg, pitch_deg, distance_m,
                             lift_m, QSize());
     return true;

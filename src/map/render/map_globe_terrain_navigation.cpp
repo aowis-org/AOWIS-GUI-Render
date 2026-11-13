@@ -553,12 +553,13 @@ void MapGlobeTerrainNavigation::syncCameraHeight(bool request_missing_tile)
     const double distance_m = qMax(MapModel::MinViewGlobeDistanceM, this->map_model->viewGlobeDistanceM());
     const double current_offset_m = this->map_model->viewGlobeVerticalOffsetM();
     const double current_collision_lift_m = this->map_model->viewGlobeCameraCollisionLiftM();
-    // Free look has no gravity: the target (and with it the eye's height)
-    // stays where the look left it, only the clearance lift still keeps the
-    // eye above the terrain, as while orbiting.
+    // Turning (orbit, free look, HUD tilt/look slider: the Rotate state)
+    // freezes the target; panning (Pan) follows the terrain in both camera
+    // modes. See the state machine in the header.
     const bool orbit_target_frozen =
-        this->map_model->view3dNavigationState() == MapView3dNavigationState::Rotate
-        || this->map_model->viewGlobeCameraMode() == MapGlobeCameraMode::FreeLook;
+        this->map_model->view3dNavigationState() == MapView3dNavigationState::Rotate;
+    const bool free_look =
+        this->map_model->viewGlobeCameraMode() == MapGlobeCameraMode::FreeLook;
     const double viewport_height_px = double(qMax(1, this->viewport_size.height()));
     const double meters_per_pixel = 2.0 * distance_m
         * std::tan(qDegreesToRadians(MapModel::GlobeFieldOfViewDeg * 0.5)) / viewport_height_px;
@@ -609,11 +610,42 @@ void MapGlobeTerrainNavigation::syncCameraHeight(bool request_missing_tile)
     {
         return;
     }
+    // Height of the rig's target above the drawn terrain under the eye that
+    // following keeps (the follow height). Orbit: 0, the target rides on the
+    // terrain under the eye. Free look: the target is wherever the look put
+    // it (above the eye when looking up), so the follow height is captured
+    // from the rig as the look left it, eye-only lift included: following
+    // then holds the eye's height above the ground exactly where it was and
+    // carries it over mountains and valleys like the orbit does. Captured
+    // again whenever an eye-preserving re-anchor moved the target (free-look
+    // steps, crosshair anchor; viewGlobeReanchorRevision()), never while
+    // turning (the target is frozen then, the lift still moving).
+    if (!free_look)
+    {
+        this->free_look_follow_captured = false;
+    }
+    else if (!orbit_target_frozen
+             && (!this->free_look_follow_captured
+                 || this->free_look_follow_revision != this->map_model->viewGlobeReanchorRevision()))
+    {
+        this->free_look_follow_height_m =
+            current_offset_m + current_collision_lift_m - rendered_camera_terrain_elevation_m;
+        this->free_look_follow_revision = this->map_model->viewGlobeReanchorRevision();
+        this->free_look_follow_captured = true;
+        if (MapRenderDiagnostics::enabled())
+            qInfo() << "AOWIS globe follow: free-look follow height" << this->free_look_follow_height_m;
+    }
+    const double follow_height_m =
+        free_look && this->free_look_follow_captured ? this->free_look_follow_height_m : 0.0;
+
     // This is deliberately the one exact DEM sample perpendicularly beneath
     // the eye. A footprint combining independently cached LODs changes
-    // membership at tile boundaries, creating discontinuous targets.
-    const double target_offset_m = rendered_camera_terrain_elevation_m
-        + qMax(0.0, MapModel::MinViewGlobeCameraGroundClearanceM - nominal_eye_height_m);
+    // membership at tile boundaries, creating discontinuous targets. The
+    // eye sits about nominal_eye_height_m + follow_height_m above that
+    // terrain; the clearance term keeps that at least the minimum.
+    const double target_offset_m = rendered_camera_terrain_elevation_m + follow_height_m
+        + qMax(0.0, MapModel::MinViewGlobeCameraGroundClearanceM - nominal_eye_height_m
+                        - follow_height_m);
 
     double elapsed_seconds = 1.0 / 60.0;
     if (this->follow_clock.isValid())

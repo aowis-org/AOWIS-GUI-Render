@@ -3,6 +3,7 @@
 // the injected detail reduction, tile requests from the preparation.
 // Checks do not depend on assert(), so they also run in Release builds.
 
+#include "geo/geo_wgs84_ellipsoid.h"
 #include "map/core/map_model.h"
 #include "map/render/map_globe_camera.h"
 #include "map/data/map_terrain_tile_source.h"
@@ -184,6 +185,68 @@ void testPreparationUsesSource()
     navigation.setSurfacePreparation(&preparation);
     expectTrue(true, "navigation accepts the same source and reduction");
 }
+
+// The rig's eye height above the ellipsoid (as the renderer builds it).
+double eyeHeightM(const MapModel &model)
+{
+    const GeoWgs84Ellipsoid::EcefPositionD eye = GeoWgs84Ellipsoid::orbitCameraEyeEcefD(
+        model.centerLon(), model.centerLat(), model.viewGlobeYawDeg(),
+        std::clamp(model.viewGlobePitchDeg(), MapModel::MinViewGlobeFreeLookPitchDeg,
+                   MapModel::MaxViewGlobePitchDeg),
+        std::max(MapModel::MinViewGlobeDistanceM, model.viewGlobeDistanceM()),
+        model.viewGlobeVerticalOffsetM(), model.viewGlobeCameraCollisionLiftM());
+    double lon_deg = 0.0;
+    double lat_deg = 0.0;
+    double height_m = 0.0;
+    GeoWgs84Ellipsoid::ecefToGeodetic(eye, &lon_deg, &lat_deg, &height_m);
+    return height_m;
+}
+
+// State machine: free look turns with a frozen target, then pans with
+// terrain following that keeps the eye's height above the ground (flat
+// ground here: the eye must neither sink nor rise, also after a look up that
+// put the target high above the eye).
+void testFreeLookFollow()
+{
+    FakeTerrainSource source;
+    MapModel model;
+    model.setCenter(8.6821, 50.1109);
+    model.setViewMode(MapViewMode::Globe, QSize(1280, 720));
+    model.setViewGlobeDistanceM(5000.0);
+    model.setViewGlobePitchDeg(30.0);
+
+    MapGlobeTerrainNavigation navigation(&model);
+    navigation.setTerrainRepository(&source);
+    navigation.setViewportSize(QSize(1280, 720));
+    navigation.syncCameraHeight(false);
+    const double orbit_eye_height_m = eyeHeightM(model);
+
+    model.beginView3dRotateInteraction();
+    model.setViewGlobeLookDepressionDeg(-30.0);
+    navigation.syncCameraHeight(false);
+    model.endView3dRotateInteraction();
+    expectTrue(model.viewGlobeCameraMode() == MapGlobeCameraMode::FreeLook
+                   && model.viewGlobePitchDeg() < 0.0,
+               "the look up put the target above the eye");
+    expectTrue(std::abs(eyeHeightM(model) - orbit_eye_height_m) < 0.01, "the look keeps the eye in place");
+
+    navigation.syncCameraHeight(false);
+    expectTrue(std::abs(eyeHeightM(model) - orbit_eye_height_m) < 0.01,
+               "ending the look keeps the eye's height (follow height captured)");
+    expectTrue(!navigation.following(), "nothing left to follow on flat ground");
+
+    model.setCenter(8.70, 50.12);
+    navigation.syncCameraHeight(false);
+    expectTrue(std::abs(eyeHeightM(model) - orbit_eye_height_m) < 0.01,
+               "panning in free look keeps the eye's height above the ground");
+
+    // Back to the orbit: its 0..90 lock, following from the DEM under the eye.
+    model.beginView3dRotateInteraction();
+    model.setViewGlobeCameraMode(MapGlobeCameraMode::Orbit);
+    model.endView3dRotateInteraction();
+    expectTrue(model.viewGlobePitchDeg() >= MapModel::MinViewGlobePitchDeg,
+               "the orbit restores its tilt lock");
+}
 }
 
 int main()
@@ -191,6 +254,7 @@ int main()
     testFixedEyeCamera();
     testTerrainLevels();
     testPreparationUsesSource();
+    testFreeLookFollow();
     if (g_failures != 0)
     {
         std::fprintf(stderr, "%d of %d globe terrain checks failed\n", g_failures, g_checks);

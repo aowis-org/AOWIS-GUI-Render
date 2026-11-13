@@ -30,8 +30,9 @@ enum class MapView3dNavigationState
 // always above the target's horizon (pitch 0..90, the Ctrl / middle-button
 // orbit and the HUD tilt). FreeLook: about the eye itself, FPS-style, from
 // straight down to straight up (rig pitch -90..90; the Alt look and the HUD
-// look slider), terrain following paused (no gravity, only the clearance
-// lift keeps the eye above ground). Starting an orbit returns to Orbit.
+// look slider). Both modes pan with the same terrain following (the eye
+// keeps its height above the ground; MapGlobeTerrainNavigation documents the
+// states and transitions). Starting an orbit returns to Orbit.
 enum class MapGlobeCameraMode
 {
     Orbit,
@@ -295,6 +296,11 @@ public:
     // clamp (which would move the eye).
     bool setViewGlobeOrbitEyeAndTarget(const GeoWgs84Ellipsoid::EcefPositionD &eye,
                                        const GeoWgs84Ellipsoid::EcefPositionD &target);
+    // Counts successful setViewGlobeOrbitEyeAndTarget() calls (crosshair
+    // anchor and release, every free-look step). Terrain following in free
+    // look re-captures its height above the terrain when this changes: the
+    // re-anchor moved the target height with the eye kept in place.
+    quint64 viewGlobeReanchorRevision() const { return this->m_view_globe_reanchor_revision; }
     // Model-only ellipsoid fallback for the geodetic coordinate under
     // screen_position. The Globe resolves against its rendered DEM
     // first because MapModel intentionally has no renderer/terrain-mesh access.
@@ -372,6 +378,7 @@ private:
     double m_view_globe_camera_collision_lift_m = 0.0;
     bool m_view_globe_north_up_locked = true;
     MapGlobeCameraMode m_view_globe_camera_mode = MapGlobeCameraMode::Orbit;
+    quint64 m_view_globe_reanchor_revision = 0;
 };
 
 #endif // MAP_MODEL_H

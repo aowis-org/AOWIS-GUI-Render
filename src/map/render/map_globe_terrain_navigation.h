@@ -29,6 +29,35 @@ class MapTerrainTileSource;
 // - the pointer coordinate with its DEM altitude, and cached DEM elevations
 //   at the LOD the surface shows (2D footer, X-Ray classification later).
 //
+// Globe camera state machine (MapModel's MapView3dNavigationState x
+// MapGlobeCameraMode; the eye never jumps on a transition):
+//
+//   Orbit + Pan       following: target height = DEM under the eye, so the
+//                     eye keeps its height above the ground (nominal eye
+//                     height of distance/pitch, min. clearance) over
+//                     mountains and valleys.
+//   Orbit + Rotate    Ctrl / middle-button orbit, HUD compass/tilt: target
+//                     frozen on the crosshair terrain, eye-only lift for
+//                     clearance.
+//   FreeLook + Rotate Alt look, HUD look slider: target frozen (moved only by
+//                     the look's own eye-preserving re-anchors), eye-only lift.
+//   FreeLook + Pan    following like Orbit + Pan, with the target held at the
+//                     follow height above the DEM under the eye that the look
+//                     left (so the eye's height above ground is kept); the
+//                     HUD joystick's look steps re-capture it.
+//
+//   Pan -> Rotate          anchorOrbitAtCrosshair() (pivot on the crosshair
+//                          terrain; eye kept).
+//   Orbit Rotate -> Pan    releaseOrbitAnchor(): target slid along the view
+//                          ray to the DEM-under-eye height, following resumes.
+//   FreeLook Rotate -> Pan the next syncCameraHeight() captures the follow
+//                          height (eye kept, lift handed to the offset).
+//   Orbit -> FreeLook      the look key / look slider / joystick look
+//                          (MapModel::lookViewGlobe()).
+//   FreeLook -> Orbit      Ctrl / middle-button orbit start (after the
+//                          crosshair anchor; a view above the horizon tilts
+//                          down to it) and every view mode switch.
+//
 // Ported from the removed QRhi map widget (same constants, same sampling,
 // same filter). The owner keeps it fed: setSurfacePreparation() with the globe it
 // draws, setViewportSize() with the logical size of the map, and calls
@@ -108,6 +137,11 @@ private:
     // Real time between filter steps (frames, camera changes).
     QElapsedTimer follow_clock;
     bool follow_active = false;
+    // Free look's follow height (target above the DEM under the eye), the
+    // re-anchor revision it was captured at, and whether it is valid.
+    double free_look_follow_height_m = 0.0;
+    quint64 free_look_follow_revision = 0;
+    bool free_look_follow_captured = false;
     // setViewGlobeTerrainHeightOffsetsM() can re-enter through MapModel's
     // signals; one step at a time.
     bool sync_active = false;

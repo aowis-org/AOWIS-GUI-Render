@@ -277,9 +277,11 @@ MapBgfxMapView::MapBgfxMapView(MapModel *model, MapBgfxMapViewHost *view_host,
             this->terrain_navigation.anchorOrbitAtCrosshair();
             return;
         }
-        // Its end moves the target along the same ray to following's height
-        // (eye unchanged) and resumes ordinary following from there. Free
-        // look keeps its target: following stays paused there (no gravity).
+        // Its end resumes terrain following (state machine:
+        // MapGlobeTerrainNavigation). Orbit: the target slides along the same
+        // ray to following's height first (eye unchanged). Free look keeps
+        // its target; the follow step below captures its height above the
+        // ground, so panning keeps the eye's height over the terrain.
         if (this->map_model->viewGlobeCameraMode() == MapGlobeCameraMode::Orbit)
             this->terrain_navigation.releaseOrbitAnchor();
         syncGlobeCameraHeight(true);
