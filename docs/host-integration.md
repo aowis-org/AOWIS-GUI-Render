@@ -83,8 +83,13 @@ Every host:
 - applies HUD commands from `setHudActionHandler()` (view mode, zoom,
   joystick, toggles, underground mode, download cancel, legend choices);
 - injects settings and assets: `setTerrainDetailReductionSource()`,
-  `setGlobeModelImages()`, `setHudImages()`, `setHudNavigationKeys()`,
+  `setAntialiasingSamplesSource()` (MSAA 0 / 2 / 4 / 8 / 16, read live),
+  `setGlobeModelImages()`, `setHudImages()`, `setHudNavigationKeys()` (pan
+  and zoom keys, the globe's orbit and look hold keys),
   `setHudScaleProvider()`, `setGlobeHudStateProvider()`;
+- reports its camera gestures to the HUD: `setHudNavigationGesture()` while
+  an orbit or free look runs (the hint at the bottom), and may open the
+  globe controls card for a first-run tip (`showHudGlobeHelpFor(seconds)`);
 - sets the repositories (`setTileRepository()`, `setTerrainRepository()`)
   and, if it has one, the network (`setNetworkSnapshot()`, `setSymbology()`,
   `setVisualControlSettings()`).
@@ -95,6 +100,13 @@ Every host:
   `QWidget::createWindowContainer()`); the view deletes it if no host ever
   reparented it. `setNativeWindowAcceptsFocus(false)` keeps keyboard focus
   on another receiver.
+- Focus routing on a press (`mapViewFocusNavigationInput()`) may move the
+  system focus between the top-level window and the embedded native window
+  (Windows does, per click). The view ignores a focus or activation loss
+  while a mouse button is held and focus stays inside the map's own
+  top-level window, so such routing never cancels the drag the press
+  started. A host should return early from its focus routing when the
+  native window already has focus.
 - Native handles come from `BgfxQtNativeSurface::capture()`;
   `setNativeSurfaceCapture()` replaces it for a toolkit that adapter lacks.
 - Wrap planned reparenting (fullscreen and the like) in

@@ -110,8 +110,16 @@ How `AOWIS::RenderMap` draws the map. The pipeline that feeds it is in
 * Buffers are uploaded only on geometry revisions; camera movement changes
   only per-chunk uniforms. The debug overlay shows uploads and
   drawn/total chunks.
-* 4x MSAA (`BGFX_RESET_MSAA_X4`, clamped by bgfx to renderer support) for
-  antialiased line and marker edges.
+* Multisample antialiasing of the back buffer, the host's setting
+  (`setAntialiasingSamplesSource()`: off, 2x, 4x default, 8x, 16x; read every
+  frame, a change recreates the back buffer). The pinned bgfx takes MSAA per
+  surface in `bgfx::SwapChain::flags` (`BGFX_SWAP_CHAIN_MSAA_*`, for
+  `bgfx::init` and `bgfx::reset(flags, &swapChain)`); `BGFX_RESET_MSAA_*` in
+  the reset flags is masked out by `bgfx::reset()` and has no effect
+  (`bgfx_antialiasing.h`). The renderer clamps a level the GPU lacks.
+  WebAssembly: none in bgfx; the browser antialiases the WebGL canvas.
+  Globe pipes and junctions also smooth their edges in their shaders, so MSAA
+  shows most on 2D lines, terrain silhouettes and models.
 * Shaders are compiled per renderer family and embedded in Qt resources
   (see "Renderer selection").
 
@@ -193,7 +201,19 @@ draw per frame. Every host gets the same HUD.
   configured keys (`setHudNavigationKeys()`).
 * Keyboard focus: any press on the map or a HUD element calls the host's
   `mapViewFocusNavigationInput(Qt::MouseFocusReason)`, so the keys return to
-  the map.
+  the map. Focus moves that this routing causes while the button is held do
+  not cancel the drag (see Host integration, native window).
+* Globe controls help: a "?" button after the globe toggles (wherever the
+  globe is shown, the editor too) opens a card under the top-left panel that
+  lists the mouse and keyboard controls with the host's configured keys
+  (left drag, wheel, orbit hold key, middle drag, look hold key, pan and
+  zoom keys, Shift for faster panning) and where to change them. A click on
+  "?" closes it. `showHudGlobeHelpFor(seconds)` opens it for that long of
+  shown globe (the GUI's first-run tip). The card blocks map input under it.
+* Gesture hint: while the host reports a camera gesture
+  (`setHudNavigationGesture()`: orbit by hold key, orbit by middle button,
+  free look), a line at the bottom centre says what it does and how to end
+  it ("Release Ctrl to stop."). Not a blocking panel.
 * Map legend, bottom right: node /
   link / heatmap metric combos (list opens on press, below or above the
   combo and tall enough for every entry; only when neither side has room it
@@ -337,8 +357,9 @@ The globe is a WGS84 ellipsoid with DEM terrain, imagery draped on it, a sky,
 the network in 3D and an optional heatmap. All of it is drawn by
 `MapBgfxMapView::renderGlobe()` into a D24S8 swapchain (native window) or
 the host's depth-buffered framebuffer (host context). The camera is
-`MapModel`'s orbit rig around the crosshair's pivot; `MapGlobeCamera` turns
-it into the render matrices about a sticky ECEF render origin.
+`MapModel`'s orbit rig (target, yaw, pitch, distance, vertical offset,
+eye-only collision lift); `MapGlobeCamera` turns it into the render
+matrices about a sticky ECEF render origin.
 
 ### Terrain surface
 
@@ -517,13 +538,11 @@ uniforms, the missing-imagery and polar-cap textures and the draw submission;
 
 `src/map/render/map_globe_terrain_navigation.*`:
 
-* Camera height: the orbit rig's vertical offset follows the DEM
-  perpendicularly beneath the eye; while rotating (frozen pivot) an eye-only
-  collision lift keeps `MinViewGlobeCameraGroundClearanceM`, released into the
-  offset when the orbit ends. Monotonic exponential filter (0.22 s / 0.16 s),
-  settled at a quarter pixel. Camera changes take a step at once (and request
-  the DEM tile under the eye); the surface's frame loop continues the filter
-  while `following()` (no extra timer).
+* Camera height: see "Camera modes and terrain following" below.
+  Monotonic exponential filter (0.22 s / 0.16 s), settled at a quarter pixel.
+  Camera changes take a step at once (and request the DEM tile under the
+  eye); the surface's frame loop continues the filter while `following()`
+  (no extra timer).
 * Rays against the drawn surface (`MapGlobeSurfacePreparation`'s retained
   meshes, ellipsoid elsewhere): the pointer coordinate with DEM altitude,
   `globeSurfaceRayHitAtScreen()`, and the crosshair's surface point for
@@ -552,6 +571,50 @@ uniforms, the missing-imagery and polar-cap textures and the draw submission;
   `zoomGlobeEyeBy()`). Render, rays and picking then use that eye
   (`MapCameraViewState::eye_pose`, invalidated through
   `globe_pose_revision`); `std::nullopt` returns to the orbit rig.
+
+### Camera modes and terrain following
+
+Two orthogonal states: `MapModel::view3dNavigationState()` (Pan or Rotate,
+Rotate while a turning gesture runs) and `MapModel::viewGlobeCameraMode()`
+(`MapGlobeCameraMode::Orbit` or `FreeLook`). The table is also the header
+comment of `map_globe_terrain_navigation.h`.
+
+| State | Behaviour |
+| --- | --- |
+| Orbit + Pan | Terrain following: the rig's target height is the drawn DEM perpendicularly beneath the eye, so the eye keeps its height above the ground (nominal eye height of distance and pitch, at least `MinViewGlobeCameraGroundClearanceM`) over mountains and valleys. |
+| Orbit + Rotate | Ctrl / middle-button orbit, HUD compass and tilt: target frozen on the terrain at the crosshair; only the eye-only collision lift moves, for clearance. Pitch 0 to 90 degrees (`MinViewGlobePitchDeg`). |
+| FreeLook + Rotate | Alt look, HUD look slider: the eye stays put and the view turns about it (`lookViewGlobeByPointerDelta()`, `setViewGlobeLookDepressionDeg()`); heading about the eye's own up (level horizon), view angle from straight down to straight up (`MaxViewGlobeLookAngleDeg` 89.5 degrees, minus twice the target's normal tilt d / R so the picture never flips). Rig pitch -90 to 90 (`MinViewGlobeFreeLookPitchDeg`); collision lift as above. |
+| FreeLook + Pan | Terrain following like Orbit + Pan, with the target held at a captured follow height above the DEM under the eye (the height the look left, lift included), so the eye's height above the ground is kept, also while looking at the sky. |
+
+Transitions (the eye never moves on any of them):
+
+| Transition | What happens |
+| --- | --- |
+| Pan -> Rotate | `anchorOrbitAtCrosshair()`: the crosshair ray against the drawn surface (terrain mesh, else ellipsoid); the rig is re-anchored on the hit with the eye kept (`MapModel::setViewGlobeOrbitEyeAndTarget()`), so the rotation axis is the local up at the terrain under the crosshair. No hit (sky): rig unchanged. |
+| Orbit Rotate -> Pan | `releaseOrbitAnchor()`: the target slides along the same view ray to the DEM-under-eye height following aims for; following resumes without lifting or lowering the rig. |
+| FreeLook Rotate -> Pan | The next follow step captures the follow height (offset + lift - DEM under the eye); the lift is handed over to the offset. |
+| Orbit -> FreeLook | The first look step (look key, HUD look slider, or in FreeLook the HUD compass / joystick, which turn about the eye then). |
+| FreeLook -> Orbit | The start of a Ctrl / middle-button orbit (after the crosshair anchor; a view above the target's horizon tilts down to it), and every view mode switch. |
+
+Details:
+
+* `setViewGlobeOrbitEyeAndTarget()` is the exact inverse of
+  `GeoWgs84Ellipsoid::orbitCameraEyeEcefD()` (eye error ~1e-8 m). Within
+  1e-6 rad of the vertical the horizontal part is rounding noise, so the
+  current yaw is kept (the globe opens at pitch 90: a heading derived there
+  spun the picture on the first orbit). It refuses (rig unchanged) a pitch
+  or distance outside the current mode's range, e.g. a crosshair hit
+  closer than `MinViewGlobeDistanceM` (360 m): that orbit keeps the old
+  pivot.
+* Every successful re-anchor counts `viewGlobeReanchorRevision()`; in
+  FreeLook + Pan a changed revision makes the next follow step re-capture
+  the follow height (the HUD joystick turns the view without a Rotate state).
+* The HUD tilt slider follows the mode: Orbit tilt 0 to 90, or in FreeLook
+  the view angle at the eye from 90 (down) through 0 (ahead) to -90 (up);
+  right press animates it back to the default tilt or to straight ahead.
+* Tests: `render_view_test` (free-look limits, orbit lock, mode reset,
+  vertical re-anchor keeps the heading), `render_globe_terrain_test`
+  (ending a free look and panning keep the eye's height).
 
 ### Network on the globe
 
@@ -642,8 +705,8 @@ deliberately reaches entities behind or under the terrain: buried and hidden par
 
 ### Globe HUD
 
-* Layout: "wireframe", "map" and "hillshade" toggles next to the 2D/3D
-  switch, the "Terrain mesh" progress next to the downloads (x / y, or
+* Layout: "wireframe", "map" and "hillshade" toggles and the "?" controls
+  help next to the 2D/3D switch, the "Terrain mesh" progress next to the downloads (x / y, or
   "building..."; only after 0.6 s of continuous mesh building, gone 0.4 s
   after it ended, the HUD animating meanwhile so an idle view presents that
   frame), and bottom left the four camera sliders (network height, tilt,

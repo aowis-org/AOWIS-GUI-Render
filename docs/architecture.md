@@ -30,9 +30,12 @@ appear only in the hosts. `AOWIS::RenderDevice` does not use Qt at all.
 ## From the server to a frame
 
 1. **Camera.** `MapModel` holds the camera. 2D uses a continuous zoom; the
-   globe uses an orbit rig around a terrain-aware pivot. The host's input
-   drives it through `MapModel` (pan, zoom, orbit) or through the view's
-   navigation hooks.
+   globe uses an orbit rig with two modes: Orbit (around the terrain under
+   the crosshair, tilt 0 to 90 degrees) and FreeLook (the view turns about
+   the eye, straight down to straight up). Panning follows the terrain in
+   both. The host's input drives it through `MapModel` (pan, zoom, orbit,
+   look) or through the view's navigation hooks; the states and transitions
+   are in [Renderer](renderer.md#camera-modes-and-terrain-following).
 2. **Imagery providers.** `MapModel` resolves the provider and the source for
    each zoom through the host's `MapImageryProviderDirectory`.
    `MapProviderCatalog` implements it from the server's `GET /map/v1/providers`
