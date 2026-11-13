@@ -157,6 +157,12 @@ public:
     // The user's terrain detail setting, read live by the globe's surface
     // preparation and the terrain navigation.
     void setTerrainDetailReductionSource(std::function<int()> source);
+    // The user's antialiasing setting (MSAA samples: 0 = off, 2, 4, 8, 16;
+    // bgfx_antialiasing.h), read live: a change recreates the native back
+    // buffer on the next frame. Unset: BgfxAntialiasingDefaultSamples.
+    // WebAssembly ignores it (the browser multisamples the canvas, see
+    // createBrowserContext()).
+    void setAntialiasingSamplesSource(std::function<int()> source);
     // Tank and reservoir model textures (host assets).
     void setGlobeModelImages(const QImage &tank_albedo, const QImage &reservoir_albedo);
     // HUD assets and host settings: button images, the navigation keys shown
@@ -446,6 +452,8 @@ private:
     // repository requests on tile-set changes, then draw.
     void renderImagery(const QSizeF &logical, bool camera_moving);
     void synchronizeGeometry();
+    // Swap, present mode and the user's MSAA level for the native back buffer.
+    uint32_t currentResetFlags() const;
     // Rebuilds the selection/error highlight meshes when the selection, the
     // errors, the prepared geometry or the junction visibility changed.
     void synchronizeHighlights();
@@ -691,6 +699,11 @@ private:
     bool frame_animating = false;
     double last_frame_time_ms = -1.0;
     QSize last_physical_size;
+    // Reset flags of the native back buffer as last applied (init/reset):
+    // synchronizeGeometry() resets again when the antialiasing setting
+    // changes them, not only on resize.
+    uint32_t last_reset_flags = 0;
+    std::function<int()> antialiasing_samples_source;
     MapUndergroundMode underground_mode = MapUndergroundMode::XRay;
     bgfx::ViewId map_view_id = 0;
     bool initialized = false;

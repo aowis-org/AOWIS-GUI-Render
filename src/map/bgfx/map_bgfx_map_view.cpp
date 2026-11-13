@@ -3,6 +3,7 @@
 #include "map/bgfx/map_bgfx_2d_snapshot_adapter.h"
 #include "map/core/map_input_focus_policy.h"
 
+#include "map/bgfx/bgfx_antialiasing.h"
 #include "map/bgfx/bgfx_device_manager.h"
 #include "map/bgfx/bgfx_qt_native_surface.h"
 #include "map/bgfx/map_bgfx_backend.h"
@@ -110,8 +111,8 @@ int imageryUploadBudget(bool globe, bool camera_moving)
     return MapTileStreamingPolicy::uploadBudget(
         globe, camera_moving, globe ? globe_override : two_d_override);
 }
-// VSYNC: presentation pacing (see MapFramePacer). MSAA x4: antialiased thick
-// line and marker edges; bgfx clamps it to what the renderer supports.
+// VSYNC: presentation pacing (see MapFramePacer). MSAA: the user's level
+// (currentResetFlags()); bgfx clamps it to what the renderer supports.
 // FLIP_AFTER_RENDER: with BGFX_CONFIG_MULTITHREADED=0 bgfx by default
 // presents (swaps) the frame rendered by the previous bgfx::frame() call at
 // the start of the next one. The map renders on demand, so the last frame
@@ -119,18 +120,14 @@ int imageryUploadBudget(bool globe, bool camera_moving)
 // cleared tile selection or a just arrived tile stayed on screen as the
 // frame before, until anything else asked for a redraw. Presenting right
 // after rendering shows every frame (and one frame earlier).
-#ifdef Q_OS_WASM
-// NOT on WebGL: bgfx's OpenGL ES MSAA back buffer calls
+// MSAA is NOT used on WebGL: bgfx's OpenGL ES MSAA back buffer calls
 // glFramebufferTexture2DMultisampleEXT (EXT_multisampled_render_to_texture),
 // which WebGL does not provide. The function pointer stays NULL and the first
 // frame traps with "RuntimeError: null function" inside
 // RendererContextGL::submit(). The browser multisamples the canvas instead:
 // the WebGL context is created with antialias=true (createBrowserContext()).
-constexpr uint32_t kMapBgfxResetFlags = BGFX_RESET_VSYNC | BGFX_RESET_FLIP_AFTER_RENDER;
-#else
-constexpr uint32_t kMapBgfxResetFlags =
-    BGFX_RESET_VSYNC | BGFX_RESET_MSAA_X4 | BGFX_RESET_FLIP_AFTER_RENDER;
-#endif
+// Desktop adds the user's MSAA level on top (currentResetFlags()).
+constexpr uint32_t kMapBgfxBaseResetFlags = BGFX_RESET_VSYNC | BGFX_RESET_FLIP_AFTER_RENDER;
 // Fallback when the platform reports no usable refresh rate.
 constexpr double kFallbackRefreshHz = 60.0;
 #ifdef Q_OS_WASM
@@ -2585,15 +2582,44 @@ void MapBgfxMapView::synchronizeGeometry()
         return;
 #endif
     const QSize pixels = physicalSize();
-    if (pixels == this->last_physical_size)
+    // Polled every frame (synchronizeGeometry() runs per tick): the setting
+    // is a plain function call, the reset happens only when it changed.
+    const uint32_t reset_flags = currentResetFlags();
+    const bool antialiasing_changed = reset_flags != this->last_reset_flags;
+    if (pixels == this->last_physical_size && !antialiasing_changed)
         return;
     this->last_physical_size = pixels;
+    if (antialiasing_changed && MapRenderDiagnostics::enabled())
+        qInfo() << "bgfx map: back buffer reset for antialiasing, reset flags"
+                << Qt::hex << reset_flags;
     // Preserve a depth attachment across resize. The default SwapChain()
     // requests none, even though bgfx::Init defaults to D24S8.
     const bgfx::SwapChain swap_chain = BgfxNativeSurface::resizeSwapChain(
         static_cast<std::uint32_t>(pixels.width()),
         static_cast<std::uint32_t>(pixels.height()));
-    bgfx::reset(kMapBgfxResetFlags, &swap_chain);
+    bgfx::reset(reset_flags, &swap_chain);
+    this->last_reset_flags = reset_flags;
+    // An antialiasing change alone moves no camera: present it.
+    if (antialiasing_changed)
+        requestRedraw();
+}
+
+uint32_t MapBgfxMapView::currentResetFlags() const
+{
+#ifdef Q_OS_WASM
+    return kMapBgfxBaseResetFlags;
+#else
+    const int samples = this->antialiasing_samples_source
+        ? this->antialiasing_samples_source()
+        : BgfxAntialiasingDefaultSamples;
+    return kMapBgfxBaseResetFlags | bgfxMsaaResetFlag(samples);
+#endif
+}
+
+void MapBgfxMapView::setAntialiasingSamplesSource(std::function<int()> source)
+{
+    this->antialiasing_samples_source = std::move(source);
+    requestRedraw();
 }
 
 bool MapBgfxMapView::initializeBackend()
@@ -2643,7 +2669,8 @@ bool MapBgfxMapView::initializeBackend()
     const QSize pixels = physicalSize();
     settings.swapChain.width = static_cast<uint32_t>(pixels.width());
     settings.swapChain.height = static_cast<uint32_t>(pixels.height());
-    settings.reset = kMapBgfxResetFlags;
+    settings.reset = currentResetFlags();
+    this->last_reset_flags = settings.reset;
 
     // Renderer choice is delegated to bgfx (RendererType::Count ranks the
     // platform's renderers and falls through when one fails to initialise).

@@ -696,6 +696,7 @@ if(AOWIS_RENDER_BUILD_MAP_CORE)
         src/map/bgfx/map_bgfx_globe_resource_pool.cpp
         src/map/bgfx/map_bgfx_globe_texture_pixels.cpp
         src/map/bgfx/map_bgfx_pan_reuse.h
+        src/map/bgfx/bgfx_antialiasing.h
         src/map/bgfx/map_bgfx_hud_canvas.h
         src/map/bgfx/map_bgfx_hud_gpu.cpp
         src/map/bgfx/map_bgfx_hud_gpu.h
